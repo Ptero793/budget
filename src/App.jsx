@@ -1,5 +1,7 @@
-import { useState } from 'react'
-import { AppProvider } from './context/AppContext'
+import { useState, useEffect } from 'react'
+import { supabase } from './lib/supabase'
+import { AppProvider, useApp } from './context/AppContext'
+import LoginView from './components/Auth/LoginView'
 import MonthSelector from './components/MonthSelector'
 import SummaryCards from './components/SummaryCards'
 import TransactionsView from './components/Transactions/TransactionsView'
@@ -14,8 +16,35 @@ const TABS = [
   { id: 'insights',     label: 'Insights' },
 ]
 
-function AppShell() {
+function LoadingScreen() {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        <span className="text-4xl animate-pulse">💰</span>
+        <p className="mt-3 text-sm text-gray-500">Loading your budget…</p>
+      </div>
+    </div>
+  )
+}
+
+function AppShell({ onSignOut }) {
   const [activeTab, setActiveTab] = useState('transactions')
+  const { isLoading, dbError } = useApp()
+
+  if (isLoading) return <LoadingScreen />
+
+  if (dbError) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
+        <div className="bg-white rounded-xl border border-red-200 p-6 max-w-md text-center">
+          <p className="text-2xl mb-3">⚠️</p>
+          <h2 className="font-semibold text-gray-800 mb-1">Database connection failed</h2>
+          <p className="text-sm text-gray-500 mb-4">{dbError}</p>
+          <p className="text-xs text-gray-400">Check that VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set correctly.</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -25,7 +54,15 @@ function AppShell() {
             <span className="text-xl">💰</span>
             <h1 className="text-lg font-bold text-gray-900 whitespace-nowrap">Budget Tracker</h1>
           </div>
-          <MonthSelector />
+          <div className="flex items-center gap-3">
+            <MonthSelector />
+            <button
+              onClick={onSignOut}
+              className="text-xs text-gray-400 hover:text-gray-600 hidden sm:block"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
         <nav className="max-w-6xl mx-auto px-4">
           <div className="flex gap-0.5 overflow-x-auto scrollbar-none">
@@ -58,9 +95,29 @@ function AppShell() {
 }
 
 export default function App() {
+  const [session, setSession] = useState(undefined) // undefined = loading, null = signed out
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session))
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session)
+    })
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+  }
+
+  // Still checking auth
+  if (session === undefined) return <LoadingScreen />
+
+  // Not signed in
+  if (!session) return <LoginView />
+
   return (
     <AppProvider>
-      <AppShell />
+      <AppShell onSignOut={handleSignOut} />
     </AppProvider>
   )
 }
