@@ -1,22 +1,25 @@
-import { createContext, useContext, useReducer, useEffect } from 'react'
+import { createContext, useContext, useReducer, useEffect, useRef, useState, useCallback } from 'react'
 import { DEFAULT_CATEGORIES, DEFAULT_BUDGET_TARGETS, DEFAULT_INCOME_SOURCES } from '../data/defaultData'
-import { loadState, saveState } from '../lib/storage'
 import { getCurrentMonth, normalizeMerchant } from '../lib/utils'
+import { loadAllState, syncAction, subscribeToChanges } from '../lib/db'
 
 const AppContext = createContext(null)
 
 const BASE_STATE = {
-  transactions: [],
-  budgetTargets: DEFAULT_BUDGET_TARGETS,
-  incomeSources: DEFAULT_INCOME_SOURCES,
-  incomeActuals: {},     // { 'YYYY-MM': { sourceId: amount } }
-  categories: DEFAULT_CATEGORIES,
-  merchantOverrides: {}, // { merchantKey: category }
-  selectedMonth: getCurrentMonth(),
+  transactions:      [],
+  budgetTargets:     DEFAULT_BUDGET_TARGETS,
+  incomeSources:     DEFAULT_INCOME_SOURCES,
+  incomeActuals:     {},
+  categories:        DEFAULT_CATEGORIES,
+  merchantOverrides: {},
+  selectedMonth:     getCurrentMonth(),
 }
 
 function reducer(state, action) {
   switch (action.type) {
+
+    case 'LOAD_STATE':
+      return { ...state, ...action.payload }
 
     case 'ADD_TRANSACTIONS': {
       const existingIds = new Set(state.transactions.map(t => t.id))
@@ -24,21 +27,16 @@ function reducer(state, action) {
       return { ...state, transactions: [...state.transactions, ...newTxs] }
     }
 
-    case 'UPDATE_TRANSACTION': {
+    case 'UPDATE_TRANSACTION':
       return {
         ...state,
         transactions: state.transactions.map(t =>
           t.id === action.id ? { ...t, ...action.updates } : t
         ),
       }
-    }
 
-    case 'DELETE_TRANSACTION': {
-      return {
-        ...state,
-        transactions: state.transactions.filter(t => t.id !== action.id),
-      }
-    }
+    case 'DELETE_TRANSACTION':
+      return { ...state, transactions: state.transactions.filter(t => t.id !== action.id) }
 
     case 'SET_MERCHANT_OVERRIDE': {
       const { merchantKey, category, applyToExisting } = action
@@ -54,7 +52,7 @@ function reducer(state, action) {
     }
 
     case 'SET_BUDGET_TARGET': {
-      const existing = state.budgetTargets[action.category] || { type: 'variable' }
+      const existing = state.budgetTargets[action.category] ?? { type: 'variable' }
       return {
         ...state,
         budgetTargets: {
@@ -74,40 +72,30 @@ function reducer(state, action) {
       return {
         ...state,
         categories: [...without, name, 'UNCATEGORIZED', 'IGNORE'],
-        budgetTargets: {
-          ...state.budgetTargets,
-          [name]: { amount: 0, type: 'variable' },
-        },
+        budgetTargets: { ...state.budgetTargets, [name]: { amount: 0, type: 'variable' } },
       }
     }
 
-    case 'SET_INCOME_TARGET': {
+    case 'SET_INCOME_TARGET':
       return {
         ...state,
         incomeSources: state.incomeSources.map(s =>
           s.id === action.id ? { ...s, target: action.target } : s
         ),
       }
-    }
 
-    case 'ADD_INCOME_SOURCE': {
+    // ID must be provided in the action (not generated here) so optimistic
+    // state and the DB sync use the same value.
+    case 'ADD_INCOME_SOURCE':
       return {
         ...state,
-        incomeSources: [
-          ...state.incomeSources,
-          { id: `src_${Date.now()}`, name: action.name, target: 0 },
-        ],
+        incomeSources: [...state.incomeSources, { id: action.id, name: action.name, target: 0 }],
       }
-    }
 
-    case 'REMOVE_INCOME_SOURCE': {
-      return {
-        ...state,
-        incomeSources: state.incomeSources.filter(s => s.id !== action.id),
-      }
-    }
+    case 'REMOVE_INCOME_SOURCE':
+      return { ...state, incomeSources: state.incomeSources.filter(s => s.id !== action.id) }
 
-    case 'SET_INCOME_ACTUAL': {
+    case 'SET_INCOME_ACTUAL':
       return {
         ...state,
         incomeActuals: {
@@ -118,33 +106,68 @@ function reducer(state, action) {
           },
         },
       }
-    }
 
-    case 'SET_SELECTED_MONTH': {
+    case 'SET_SELECTED_MONTH':
       return { ...state, selectedMonth: action.month }
-    }
 
-    case 'CLEAR_ALL_DATA': {
+    case 'CLEAR_ALL_DATA':
       return { ...BASE_STATE, selectedMonth: state.selectedMonth }
-    }
 
     default:
       return state
   }
 }
 
-export function AppProvider({ children }) {
-  const [state, dispatch] = useReducer(reducer, null, () => {
-    const saved = loadState()
-    return saved ? { ...BASE_STATE, ...saved } : { ...BASE_STATE }
-  })
+// ── Provider ──────────────────────────────────────────────────────────────────
 
+export function AppProvider({ children }) {
+  const [state, rawDispatch] = useReducer(reducer, { ...BASE_STATE })
+  const [isLoading, setIsLoading] = useState(true)
+  const [dbError, setDbError] = useState(null)
+  const stateRef = useRef(state)
+  stateRef.current = state
+
+  // Initial data load from Supabase
   useEffect(() => {
-    saveState(state)
-  }, [state])
+    loadAllState()
+      .then(loaded => {
+        rawDispatch({ type: 'LOAD_STATE', payload: loaded })
+        setIsLoading(false)
+      })
+      .catch(err => {
+        console.error('[AppContext] load failed:', err)
+        setDbError(err.message)
+        setIsLoading(false)
+      })
+  }, [])
+
+  // Real-time: reload when another device makes a change
+  useEffect(() => {
+    if (isLoading) return
+    const unsubscribe = subscribeToChanges(() => {
+      loadAllState().then(loaded => rawDispatch({ type: 'LOAD_STATE', payload: loaded }))
+    })
+    return unsubscribe
+  }, [isLoading])
+
+  // Wrapped dispatch: optimistic local update + async Supabase write
+  const dispatch = useCallback(async (action) => {
+    if (action.type === 'SET_SELECTED_MONTH' || action.type === 'LOAD_STATE') {
+      rawDispatch(action)
+      return
+    }
+    // Pre-compute next state so syncAction can reference it for bulk operations
+    const nextState = reducer(stateRef.current, action)
+    rawDispatch(action)
+    try {
+      await syncAction(action, nextState)
+    } catch (err) {
+      console.error('[AppContext] sync error:', err.message)
+    }
+  }, [])
 
   return (
-    <AppContext.Provider value={{ state, dispatch }}>
+    <AppContext.Provider value={{ state, dispatch, isLoading, dbError }}>
       {children}
     </AppContext.Provider>
   )
@@ -156,18 +179,18 @@ export function useApp() {
   return ctx
 }
 
-// Derived selector: filter transactions for a given month (or all)
+// ── Pure selectors ────────────────────────────────────────────────────────────
+
 export function filterByMonth(transactions, month) {
   if (!month || month === 'all') return transactions
   return transactions.filter(t => t.date.startsWith(month))
 }
 
-// Derived selector: compute actuals per category for a set of transactions
 export function computeActuals(transactions) {
   const actuals = {}
   for (const tx of transactions) {
     if (!tx.category || tx.category === 'IGNORE') continue
-    actuals[tx.category] = (actuals[tx.category] || 0) + tx.amount
+    actuals[tx.category] = (actuals[tx.category] ?? 0) + tx.amount
   }
   return actuals
 }

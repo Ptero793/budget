@@ -66,7 +66,7 @@ export default function IncomeView() {
   const handleAddSource = (e) => {
     e.preventDefault()
     if (!newSourceName.trim()) return
-    dispatch({ type: 'ADD_INCOME_SOURCE', name: newSourceName.trim() })
+    dispatch({ type: 'ADD_INCOME_SOURCE', id: `src_${Date.now()}`, name: newSourceName.trim() })
     setNewSourceName('')
     setShowAdd(false)
   }
