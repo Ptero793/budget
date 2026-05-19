@@ -31,21 +31,33 @@ function txToRow(tx) {
 // ── Initial load ──────────────────────────────────────────────────────────────
 
 export async function loadAllState() {
-  const [txRes, budgetRes, catRes, srcRes, actualRes, overrideRes] = await Promise.all([
+  const [txRes, budgetRes, catRes, srcRes, actualRes, overrideRes, budgetOverrideRes] = await Promise.all([
     supabase.from('transactions').select('*').order('date', { ascending: false }),
     supabase.from('budget_targets').select('*'),
     supabase.from('categories').select('*').order('sort_order'),
     supabase.from('income_sources').select('*').order('sort_order'),
     supabase.from('income_actuals').select('*'),
     supabase.from('merchant_overrides').select('*'),
+    supabase.from('budget_overrides').select('*'),
   ])
 
+  // Fail loudly on query errors so callers can handle them properly.
+  // Previously, a null txRes.data would silently return transactions:[] and wipe state.
+  if (txRes.error) throw new Error(`transactions: ${txRes.error.message}`)
+  if (budgetRes.error) throw new Error(`budget_targets: ${budgetRes.error.message}`)
+  if (catRes.error) throw new Error(`categories: ${catRes.error.message}`)
+  if (srcRes.error) throw new Error(`income_sources: ${srcRes.error.message}`)
+  if (actualRes.error) throw new Error(`income_actuals: ${actualRes.error.message}`)
+  if (overrideRes.error) throw new Error(`merchant_overrides: ${overrideRes.error.message}`)
+  if (budgetOverrideRes.error) throw new Error(`budget_overrides: ${budgetOverrideRes.error.message}`)
+
   // First-time setup: seed defaults when the database is empty
-  if (!catRes.data?.length) {
+  if (!catRes.data.length) {
     await seedDefaults()
     return {
       transactions: [],
       budgetTargets: { ...DEFAULT_BUDGET_TARGETS },
+      budgetOverrides: {},
       categories: [...DEFAULT_CATEGORIES],
       incomeSources: DEFAULT_INCOME_SOURCES.map(s => ({ ...s })),
       incomeActuals: {},
@@ -69,9 +81,16 @@ export async function loadAllState() {
     merchantOverrides[row.merchant_key] = row.category
   }
 
+  const budgetOverrides = {}
+  for (const row of budgetOverrideRes.data ?? []) {
+    if (!budgetOverrides[row.month]) budgetOverrides[row.month] = {}
+    budgetOverrides[row.month][row.category] = parseFloat(row.amount)
+  }
+
   return {
     transactions: (txRes.data ?? []).map(rowToTx),
     budgetTargets,
+    budgetOverrides,
     categories: (catRes.data ?? []).map(r => r.name),
     incomeSources: (srcRes.data ?? []).map(r => ({
       id: r.id,
@@ -153,6 +172,21 @@ export async function syncAction(action, newState) {
       })
       break
 
+    case 'SET_BUDGET_OVERRIDE':
+      await supabase.from('budget_overrides').upsert({
+        category: action.category,
+        month: action.month,
+        amount: action.amount,
+      })
+      break
+
+    case 'REMOVE_BUDGET_OVERRIDE':
+      await supabase.from('budget_overrides')
+        .delete()
+        .eq('category', action.category)
+        .eq('month', action.month)
+      break
+
     case 'ADD_CATEGORY': {
       const name = action.category.toUpperCase().trim()
       await Promise.all([
@@ -212,6 +246,7 @@ export function subscribeToChanges(onUpdate) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'income_sources' }, () => onUpdate('income_sources'))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'income_actuals' }, () => onUpdate('income_actuals'))
     .on('postgres_changes', { event: '*', schema: 'public', table: 'merchant_overrides' }, () => onUpdate('merchant_overrides'))
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'budget_overrides' }, () => onUpdate('budget_overrides'))
     .subscribe()
 
   return () => supabase.removeChannel(channel)
