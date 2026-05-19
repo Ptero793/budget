@@ -141,10 +141,19 @@ export function AppProvider({ children }) {
       })
   }, [])
 
-  // Real-time: reload when another device makes a change
+  // isSyncing prevents our own real-time events from overwriting optimistic state
+  const isSyncing = useRef(false)
+  const pendingReload = useRef(false)
+
+  // Real-time: reload when ANOTHER device makes a change
   useEffect(() => {
     if (isLoading) return
     const unsubscribe = subscribeToChanges(() => {
+      if (isSyncing.current) {
+        // We triggered this event ourselves — defer the reload until sync finishes
+        pendingReload.current = true
+        return
+      }
       loadAllState().then(loaded => rawDispatch({ type: 'LOAD_STATE', payload: loaded }))
     })
     return unsubscribe
@@ -158,11 +167,19 @@ export function AppProvider({ children }) {
     }
     // Pre-compute next state so syncAction can reference it for bulk operations
     const nextState = reducer(stateRef.current, action)
+    isSyncing.current = true
     rawDispatch(action)
     try {
       await syncAction(action, nextState)
     } catch (err) {
       console.error('[AppContext] sync error:', err.message)
+    } finally {
+      isSyncing.current = false
+      // If a real-time event arrived while we were syncing, do the reload now
+      if (pendingReload.current) {
+        pendingReload.current = false
+        loadAllState().then(loaded => rawDispatch({ type: 'LOAD_STATE', payload: loaded }))
+      }
     }
   }, [])
 

@@ -99,6 +99,15 @@ async function seedDefaults() {
   ])
 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+async function upsertChunked(table, rows, chunkSize = 50) {
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const { error } = await supabase.from(table).upsert(rows.slice(i, i + chunkSize))
+    if (error) throw new Error(`upsert ${table}: ${error.message}`)
+  }
+}
+
 // ── Action → DB sync ──────────────────────────────────────────────────────────
 // Called after each reducer dispatch with the action and the resulting new state.
 
@@ -106,12 +115,15 @@ export async function syncAction(action, newState) {
   switch (action.type) {
 
     case 'ADD_TRANSACTIONS':
-      await supabase.from('transactions').upsert(action.transactions.map(txToRow))
+      await upsertChunked('transactions', action.transactions.map(txToRow))
       break
 
     case 'UPDATE_TRANSACTION': {
       const tx = newState.transactions.find(t => t.id === action.id)
-      if (tx) await supabase.from('transactions').upsert(txToRow(tx))
+      if (tx) {
+        const { error } = await supabase.from('transactions').upsert(txToRow(tx))
+        if (error) throw new Error(`update transaction: ${error.message}`)
+      }
       break
     }
 
@@ -127,7 +139,7 @@ export async function syncAction(action, newState) {
           t => normalizeMerchant(t.description) === merchantKey
         )
         if (affected.length) {
-          await supabase.from('transactions').upsert(affected.map(txToRow))
+          await upsertChunked('transactions', affected.map(txToRow))
         }
       }
       break
