@@ -133,9 +133,13 @@ async function upsertChunked(table, rows, chunkSize = 50) {
 export async function syncAction(action, newState) {
   switch (action.type) {
 
-    case 'ADD_TRANSACTIONS':
-      await upsertChunked('transactions', action.transactions.map(txToRow))
+    case 'ADD_TRANSACTIONS': {
+      // Deduplicate by ID — a CSV can contain two identical rows (same date/description/amount)
+      // which produce the same hash ID. PostgreSQL rejects upserting the same row twice in one batch.
+      const uniqueRows = [...new Map(action.transactions.map(t => [t.id, txToRow(t)])).values()]
+      await upsertChunked('transactions', uniqueRows)
       break
+    }
 
     case 'UPDATE_TRANSACTION': {
       const tx = newState.transactions.find(t => t.id === action.id)

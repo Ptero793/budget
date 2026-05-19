@@ -24,7 +24,12 @@ function reducer(state, action) {
 
     case 'ADD_TRANSACTIONS': {
       const existingIds = new Set(state.transactions.map(t => t.id))
-      const newTxs = action.transactions.filter(t => !existingIds.has(t.id))
+      const seen = new Set()
+      const newTxs = action.transactions.filter(t => {
+        if (existingIds.has(t.id) || seen.has(t.id)) return false
+        seen.add(t.id)
+        return true
+      })
       return { ...state, transactions: [...state.transactions, ...newTxs] }
     }
 
