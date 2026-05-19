@@ -8,6 +8,7 @@ const AppContext = createContext(null)
 const BASE_STATE = {
   transactions:      [],
   budgetTargets:     DEFAULT_BUDGET_TARGETS,
+  budgetOverrides:   {},
   incomeSources:     DEFAULT_INCOME_SOURCES,
   incomeActuals:     {},
   categories:        DEFAULT_CATEGORIES,
@@ -62,6 +63,23 @@ function reducer(state, action) {
             type: action.categoryType ?? existing.type,
           },
         },
+      }
+    }
+
+    case 'SET_BUDGET_OVERRIDE': {
+      const monthOverrides = { ...state.budgetOverrides[action.month], [action.category]: action.amount }
+      return {
+        ...state,
+        budgetOverrides: { ...state.budgetOverrides, [action.month]: monthOverrides },
+      }
+    }
+
+    case 'REMOVE_BUDGET_OVERRIDE': {
+      const monthOverrides = { ...state.budgetOverrides[action.month] }
+      delete monthOverrides[action.category]
+      return {
+        ...state,
+        budgetOverrides: { ...state.budgetOverrides, [action.month]: monthOverrides },
       }
     }
 
@@ -154,7 +172,9 @@ export function AppProvider({ children }) {
         pendingReload.current = true
         return
       }
-      loadAllState().then(loaded => rawDispatch({ type: 'LOAD_STATE', payload: loaded }))
+      loadAllState()
+        .then(loaded => rawDispatch({ type: 'LOAD_STATE', payload: loaded }))
+        .catch(err => console.error('[AppContext] realtime reload failed:', err))
     })
     return unsubscribe
   }, [isLoading])
@@ -171,14 +191,14 @@ export function AppProvider({ children }) {
     rawDispatch(action)
     try {
       await syncAction(action, nextState)
-    } catch (err) {
-      console.error('[AppContext] sync error:', err.message)
     } finally {
       isSyncing.current = false
       // If a real-time event arrived while we were syncing, do the reload now
       if (pendingReload.current) {
         pendingReload.current = false
-        loadAllState().then(loaded => rawDispatch({ type: 'LOAD_STATE', payload: loaded }))
+        loadAllState()
+          .then(loaded => rawDispatch({ type: 'LOAD_STATE', payload: loaded }))
+          .catch(err => console.error('[AppContext] deferred reload failed:', err))
       }
     }
   }, [])

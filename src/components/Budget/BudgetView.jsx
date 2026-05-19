@@ -2,15 +2,36 @@ import { useState } from 'react'
 import { useApp, filterByMonth, computeActuals } from '../../context/AppContext'
 import { formatCurrency } from '../../lib/utils'
 
-function EditableAmount({ value, onSave }) {
+function getEffectiveBudget(budgetTargets, budgetOverrides, category, month) {
+  return budgetOverrides[month]?.[category] ?? budgetTargets[category]?.amount ?? 0
+}
+
+function BudgetCell({ category, budgetTargets, budgetOverrides, selectedMonth, dispatch }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
 
-  const start = () => { setDraft(String(value)); setEditing(true) }
+  const isSpecificMonth = selectedMonth && selectedMonth !== 'all'
+  const hasOverride = isSpecificMonth && budgetOverrides[selectedMonth]?.[category] !== undefined
+  const defaultAmount = budgetTargets[category]?.amount ?? 0
+  const effectiveAmount = isSpecificMonth
+    ? getEffectiveBudget(budgetTargets, budgetOverrides, category, selectedMonth)
+    : defaultAmount
+
+  const start = () => { setDraft(String(effectiveAmount)); setEditing(true) }
   const commit = () => {
     const v = parseFloat(draft)
-    if (!isNaN(v) && v >= 0) onSave(v)
+    if (!isNaN(v) && v >= 0) {
+      if (isSpecificMonth) {
+        dispatch({ type: 'SET_BUDGET_OVERRIDE', category, month: selectedMonth, amount: v })
+      } else {
+        dispatch({ type: 'SET_BUDGET_TARGET', category, amount: v })
+      }
+    }
     setEditing(false)
+  }
+  const clearOverride = (e) => {
+    e.stopPropagation()
+    dispatch({ type: 'REMOVE_BUDGET_OVERRIDE', category, month: selectedMonth })
   }
 
   if (editing) {
@@ -30,18 +51,33 @@ function EditableAmount({ value, onSave }) {
   }
 
   return (
-    <button
-      onClick={start}
-      title="Click to edit"
-      className="text-blue-600 hover:text-blue-800 font-mono text-sm underline decoration-dashed underline-offset-2"
-    >
-      {formatCurrency(value)}
-    </button>
+    <div className="flex items-center justify-end gap-1">
+      {hasOverride && (
+        <button
+          onClick={clearOverride}
+          title={`Override: ${formatCurrency(effectiveAmount)} (default: ${formatCurrency(defaultAmount)}) — click × to reset`}
+          className="text-xs text-amber-500 hover:text-red-500 leading-none"
+        >
+          ×
+        </button>
+      )}
+      <button
+        onClick={start}
+        title={hasOverride
+          ? `Month override. Default is ${formatCurrency(defaultAmount)}. Click to change.`
+          : 'Click to edit'}
+        className={`font-mono text-sm underline decoration-dashed underline-offset-2 ${
+          hasOverride ? 'text-amber-600 hover:text-amber-800' : 'text-blue-600 hover:text-blue-800'
+        }`}
+      >
+        {formatCurrency(effectiveAmount)}
+      </button>
+    </div>
   )
 }
 
-function SectionRows({ rows, actuals, onEditBudget }) {
-  const totalBudget = rows.reduce((s, r) => s + r.amount, 0)
+function SectionRows({ rows, actuals, budgetTargets, budgetOverrides, selectedMonth, dispatch }) {
+  const totalBudget = rows.reduce((s, r) => s + r.effectiveAmount, 0)
   const totalActual = rows.reduce((s, r) => s + (actuals[r.category] || 0), 0)
   const totalVariance = totalBudget - totalActual
 
@@ -49,16 +85,22 @@ function SectionRows({ rows, actuals, onEditBudget }) {
     <>
       {rows.map(row => {
         const actual = actuals[row.category] || 0
-        const variance = row.amount - actual
-        const pct = row.amount > 0 ? Math.round((actual / row.amount) * 100) : null
+        const variance = row.effectiveAmount - actual
+        const pct = row.effectiveAmount > 0 ? Math.round((actual / row.effectiveAmount) * 100) : null
         const isOver = variance < 0
-        const isEmpty = row.amount === 0 && actual === 0
+        const isEmpty = row.effectiveAmount === 0 && actual === 0
 
         return (
           <tr key={row.category} className="hover:bg-gray-50 group transition-colors">
             <td className="py-2.5 px-4 text-gray-800 font-medium">{row.category}</td>
             <td className="py-2.5 px-4 text-right">
-              <EditableAmount value={row.amount} onSave={v => onEditBudget(row.category, v)} />
+              <BudgetCell
+                category={row.category}
+                budgetTargets={budgetTargets}
+                budgetOverrides={budgetOverrides}
+                selectedMonth={selectedMonth}
+                dispatch={dispatch}
+              />
             </td>
             <td className={`py-2.5 px-4 text-right font-mono text-sm ${actual !== 0 ? 'text-gray-900' : 'text-gray-300'}`}>
               {formatCurrency(actual)}
@@ -101,26 +143,33 @@ function SectionRows({ rows, actuals, onEditBudget }) {
 
 export default function BudgetView() {
   const { state, dispatch } = useApp()
-  const { transactions, budgetTargets, selectedMonth, categories } = state
+  const { transactions, budgetTargets, budgetOverrides, selectedMonth, categories } = state
 
   const monthTxs = filterByMonth(transactions, selectedMonth)
   const actuals = computeActuals(monthTxs)
 
-  const editBudget = (category, amount) => dispatch({ type: 'SET_BUDGET_TARGET', category, amount })
+  const isSpecificMonth = selectedMonth && selectedMonth !== 'all'
 
   const allCats = categories.filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED')
 
+  const toRow = (c) => ({
+    category: c,
+    effectiveAmount: isSpecificMonth
+      ? getEffectiveBudget(budgetTargets, budgetOverrides, c, selectedMonth)
+      : (budgetTargets[c]?.amount ?? 0),
+  })
+
   const fixedRows = allCats
     .filter(c => budgetTargets[c]?.type === 'fixed')
-    .map(c => ({ category: c, amount: budgetTargets[c]?.amount ?? 0 }))
-    .filter(r => r.amount > 0 || actuals[r.category])
+    .map(toRow)
+    .filter(r => r.effectiveAmount > 0 || actuals[r.category])
 
   const variableRows = allCats
     .filter(c => !budgetTargets[c] || budgetTargets[c].type === 'variable')
-    .map(c => ({ category: c, amount: budgetTargets[c]?.amount ?? 0 }))
-    .filter(r => r.amount > 0 || actuals[r.category])
+    .map(toRow)
+    .filter(r => r.effectiveAmount > 0 || actuals[r.category])
 
-  const totalBudget = [...fixedRows, ...variableRows].reduce((s, r) => s + r.amount, 0)
+  const totalBudget = [...fixedRows, ...variableRows].reduce((s, r) => s + r.effectiveAmount, 0)
   const totalActual = Object.values(actuals).reduce((s, v) => s + v, 0)
   const totalVariance = totalBudget - totalActual
 
@@ -133,6 +182,12 @@ export default function BudgetView() {
             ? `Under by ${formatCurrency(Math.abs(totalVariance))}`
             : `Over by ${formatCurrency(Math.abs(totalVariance))}`}
         </span>
+        {isSpecificMonth && (
+          <span className="ml-auto text-xs text-gray-400">
+            <span className="inline-block w-2 h-2 rounded-full bg-amber-400 mr-1" />
+            Amber = month-specific override (× to reset to default)
+          </span>
+        )}
       </div>
 
       <div className="overflow-x-auto">
@@ -154,7 +209,14 @@ export default function BudgetView() {
                   Fixed Expenses
                 </td>
               </tr>
-              <SectionRows rows={fixedRows} actuals={actuals} onEditBudget={editBudget} />
+              <SectionRows
+                rows={fixedRows}
+                actuals={actuals}
+                budgetTargets={budgetTargets}
+                budgetOverrides={budgetOverrides}
+                selectedMonth={selectedMonth}
+                dispatch={dispatch}
+              />
             </tbody>
           )}
 
@@ -165,7 +227,14 @@ export default function BudgetView() {
                   Variable Expenses
                 </td>
               </tr>
-              <SectionRows rows={variableRows} actuals={actuals} onEditBudget={editBudget} />
+              <SectionRows
+                rows={variableRows}
+                actuals={actuals}
+                budgetTargets={budgetTargets}
+                budgetOverrides={budgetOverrides}
+                selectedMonth={selectedMonth}
+                dispatch={dispatch}
+              />
             </tbody>
           )}
 
@@ -186,7 +255,8 @@ export default function BudgetView() {
       </div>
 
       <p className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">
-        Click any <span className="text-blue-600 underline decoration-dashed">blue amount</span> to edit the budget target
+        Click any budget amount to edit
+        {isSpecificMonth ? ' · Changes this month only · Edit in "All" view to change the default' : ' · Sets the default for all months'}
       </p>
     </div>
   )

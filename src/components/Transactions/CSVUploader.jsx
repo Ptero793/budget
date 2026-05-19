@@ -45,7 +45,9 @@ export default function CSVUploader() {
       const added = final.filter(t => !existingIds.has(t.id))
       const dupes = final.length - added.length
 
-      dispatch({ type: 'ADD_TRANSACTIONS', transactions: final })
+      setStatus('ai')
+      setMessage('Saving to database…')
+      await dispatch({ type: 'ADD_TRANSACTIONS', transactions: final })
 
       setStatus('done')
       setMessage(
