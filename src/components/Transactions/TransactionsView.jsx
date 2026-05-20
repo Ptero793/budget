@@ -4,6 +4,26 @@ import CSVUploader from './CSVUploader'
 import TransactionTable from './TransactionTable'
 import { transactionId } from '../../lib/utils'
 
+function downloadCSV(transactions) {
+  const headers = ['Date', 'Description', 'Amount', 'Category', 'Source', 'Categorization Source']
+  const rows = transactions.map(t => [
+    t.date,
+    `"${(t.description || '').replace(/"/g, '""')}"`,
+    t.amount,
+    t.category || 'UNCATEGORIZED',
+    t.source,
+    t.categorizationSource || '',
+  ])
+  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `transactions_${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 export default function TransactionsView() {
   const { state, dispatch } = useApp()
   const { transactions, selectedMonth, categories } = state
@@ -109,6 +129,13 @@ export default function TransactionsView() {
                 .map(c => <option key={c} value={c}>{c}</option>)
               }
             </select>
+            <button
+              onClick={() => downloadCSV(monthTxs)}
+              className="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg px-3 py-1.5 font-medium transition-colors"
+              title="Download visible transactions as CSV"
+            >
+              ↓ Export
+            </button>
             <button
               onClick={() => setShowManual(s => !s)}
               className="text-sm bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg px-3 py-1.5 font-medium transition-colors"
