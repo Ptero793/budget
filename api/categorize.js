@@ -26,36 +26,44 @@ export default async function handler(req, res) {
 
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 1024,
-      system: `You are a personal finance assistant. Categorize credit card transactions into the provided categories. Return ONLY a JSON array of strings with one category per transaction in the same order. No explanation, just the array.`,
+      max_tokens: 4096,
+      system: `You are a personal finance assistant. Categorize credit card transactions into the provided categories. Return ONLY a JSON array of strings — one category per transaction, same order, same count. No explanation, no markdown, just the raw JSON array.`,
       messages: [
         {
           role: 'user',
-          content: `Categories available: ${categoryList}
+          content: `Categories: ${categoryList}
 
-Transactions to categorize:
+Transactions:
 ${transactionList}
 
 Rules:
-- Choose the single best-matching category from the list
-- Use IGNORE for credit card payments, transfers, and balance payments
-- Use UNCATEGORIZED only if truly impossible to determine
+- Pick the single best category from the list above
+- TST* and similar prefixes indicate restaurant/cafe purchases → DRINKS & EATING OUT
+- AMZN, AMAZON → SHOPPING
+- Airlines, hotels, Airbnb → TRAVEL
+- Grocery stores, markets, bakeries → GROCERIES
+- IGNORE for credit card payments, transfers, refunds
+- Use UNCATEGORIZED only as a last resort — make your best guess
 
-Return format: ["CATEGORY1", "CATEGORY2", ...]`,
+Respond with exactly ${transactions.length} items: ["CAT1", "CAT2", ...]`,
         },
       ],
     })
 
     const text = message.content[0]?.text ?? ''
-    const match = text.match(/\[[\s\S]*?\]/)
+    const match = text.match(/\[[\s\S]*\]/)
     if (!match) {
       throw new Error('Model did not return a valid JSON array')
     }
 
     const result = JSON.parse(match[0])
-    if (!Array.isArray(result) || result.length !== transactions.length) {
-      throw new Error('Response array length mismatch')
+    if (!Array.isArray(result)) {
+      throw new Error('Response is not an array')
     }
+
+    // Pad or trim to match transaction count rather than failing the whole batch
+    while (result.length < transactions.length) result.push('UNCATEGORIZED')
+    result.length = transactions.length
 
     res.status(200).json({ categories: result })
   } catch (err) {
