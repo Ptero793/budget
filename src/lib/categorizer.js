@@ -104,6 +104,7 @@ export async function categorizeWithAI(transactions, categories) {
     ...tx,
     category: allResults[i]?.category || 'UNCATEGORIZED',
     categorizationConfidence: allResults[i]?.confidence ?? null,
+    categorizationCostUsd: allResults[i]?.cost_usd ?? null,
     categorizationSource: 'ai',
   }))
 

@@ -87,6 +87,10 @@ Respond with exactly ${transactions.length} objects: [{"category": "...", "confi
 
     const { input_tokens, output_tokens } = message.usage
     const cost_usd = input_tokens * COST_PER_INPUT_TOKEN + output_tokens * COST_PER_OUTPUT_TOKEN
+    const cost_per_transaction = cost_usd / transactions.length
+
+    // Attach per-transaction cost (batch cost ÷ batch size) so the client can store it on each tx
+    for (const item of result) item.cost_usd = cost_per_transaction
 
     res.status(200).json({
       results: result,
