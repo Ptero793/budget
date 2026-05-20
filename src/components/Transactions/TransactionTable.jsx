@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useApp } from '../../context/AppContext'
 import CategoryDropdown from './CategoryDropdown'
 import { formatCurrency } from '../../lib/utils'
@@ -9,7 +9,23 @@ const SOURCE_BADGES = {
   manual: { label: 'Manual', color: 'bg-gray-100 text-gray-600' },
 }
 
-export default function TransactionTable({ transactions }) {
+function IndeterminateCheckbox({ checked, indeterminate, onChange, className = '' }) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (ref.current) ref.current.indeterminate = indeterminate
+  }, [indeterminate])
+  return (
+    <input
+      ref={ref}
+      type="checkbox"
+      checked={checked}
+      onChange={onChange}
+      className={`w-4 h-4 rounded border-gray-300 text-blue-600 cursor-pointer focus:ring-blue-500 ${className}`}
+    />
+  )
+}
+
+export default function TransactionTable({ transactions, selectedIds, allSelected, onToggleSelect, onSelectAll }) {
   const { dispatch } = useApp()
   const [sortField, setSortField] = useState('date')
   const [sortDir, setSortDir] = useState('desc')
@@ -45,6 +61,9 @@ export default function TransactionTable({ transactions }) {
     </th>
   )
 
+  const someSelected = selectedIds.size > 0
+  const indeterminate = someSelected && !allSelected
+
   if (!sorted.length) {
     return (
       <div className="text-center py-16 text-gray-400">
@@ -60,6 +79,13 @@ export default function TransactionTable({ transactions }) {
       <table className="w-full text-sm">
         <thead className="border-b border-gray-200 bg-gray-50">
           <tr>
+            <th className="py-3 pl-4 pr-2 w-8">
+              <IndeterminateCheckbox
+                checked={allSelected}
+                indeterminate={indeterminate}
+                onChange={onSelectAll}
+              />
+            </th>
             <Th field="date" label="Date" className="w-28" />
             <Th field="description" label="Description" />
             <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
@@ -70,9 +96,13 @@ export default function TransactionTable({ transactions }) {
         </thead>
         <tbody className="divide-y divide-gray-100">
           {sorted.map(tx => (
-            <TransactionRow key={tx.id} tx={tx} onDelete={() =>
-              dispatch({ type: 'DELETE_TRANSACTION', id: tx.id })
-            } />
+            <TransactionRow
+              key={tx.id}
+              tx={tx}
+              selected={selectedIds.has(tx.id)}
+              onToggle={() => onToggleSelect(tx.id)}
+              onDelete={() => dispatch({ type: 'DELETE_TRANSACTION', id: tx.id })}
+            />
           ))}
         </tbody>
       </table>
@@ -80,12 +110,26 @@ export default function TransactionTable({ transactions }) {
   )
 }
 
-function TransactionRow({ tx, onDelete }) {
+function TransactionRow({ tx, selected, onToggle, onDelete }) {
   const isUncategorized = !tx.category || tx.category === 'UNCATEGORIZED'
   const isCredit = tx.amount < 0
 
   return (
-    <tr className={`group hover:bg-gray-50 transition-colors ${isUncategorized ? 'bg-amber-50 hover:bg-amber-50' : ''}`}>
+    <tr className={`group transition-colors ${
+      selected
+        ? 'bg-blue-50'
+        : isUncategorized
+        ? 'bg-amber-50 hover:bg-amber-100'
+        : 'hover:bg-gray-50'
+    }`}>
+      <td className="py-2.5 pl-4 pr-2">
+        <input
+          type="checkbox"
+          checked={selected}
+          onChange={onToggle}
+          className="w-4 h-4 rounded border-gray-300 text-blue-600 cursor-pointer focus:ring-blue-500"
+        />
+      </td>
       <td className="py-2.5 px-4 text-gray-500 whitespace-nowrap text-xs">
         {tx.date}
       </td>
