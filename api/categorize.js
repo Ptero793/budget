@@ -63,8 +63,10 @@ Respond with exactly ${transactions.length} objects: [{"category": "...", "confi
     })
 
     const text = message.content[0]?.text ?? ''
+    console.log('[categorize] raw response:', text.slice(0, 500))
+
     const match = text.match(/\[[\s\S]*\]/)
-    if (!match) throw new Error('Model did not return a valid JSON array')
+    if (!match) throw new Error(`No JSON array found in response: ${text.slice(0, 200)}`)
 
     const result = JSON.parse(match[0])
     if (!Array.isArray(result)) throw new Error('Response is not an array')
