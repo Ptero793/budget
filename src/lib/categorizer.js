@@ -60,7 +60,9 @@ export function categorizeLocally(transactions, merchantOverrides) {
 export async function categorizeWithAI(transactions, categories) {
   if (!transactions.length) return []
 
-  const usableCategories = categories.filter(c => c !== 'UNCATEGORIZED' && c !== 'IGNORE')
+  // Keep IGNORE in the list since we need the model to use it for payments/refunds.
+  // Exclude UNCATEGORIZED so the model can't fall back to it.
+  const usableCategories = categories.filter(c => c !== 'UNCATEGORIZED')
 
   const response = await fetch('/api/categorize', {
     method: 'POST',
