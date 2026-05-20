@@ -13,6 +13,9 @@ function rowToTx(row) {
     category: row.category,
     source: row.source,
     categorizationSource: row.categorization_source,
+    categorizationConfidence: row.categorization_confidence != null
+      ? parseFloat(row.categorization_confidence)
+      : null,
   }
 }
 
@@ -25,7 +28,14 @@ function txToRow(tx) {
     category: tx.category,
     source: tx.source,
     categorization_source: tx.categorizationSource,
+    categorization_confidence: tx.categorizationConfidence ?? null,
   }
+}
+
+export async function logCategorizationCost(usage) {
+  if (!usage) return
+  const { error } = await supabase.from('categorization_costs').insert(usage)
+  if (error) console.error('[db] log cost failed:', error.message)
 }
 
 // ── Initial load ──────────────────────────────────────────────────────────────
