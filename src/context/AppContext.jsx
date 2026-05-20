@@ -44,6 +44,21 @@ function reducer(state, action) {
     case 'DELETE_TRANSACTION':
       return { ...state, transactions: state.transactions.filter(t => t.id !== action.id) }
 
+    case 'DELETE_TRANSACTIONS': {
+      const ids = new Set(action.ids)
+      return { ...state, transactions: state.transactions.filter(t => !ids.has(t.id)) }
+    }
+
+    case 'UPDATE_TRANSACTIONS': {
+      const ids = new Set(action.ids)
+      return {
+        ...state,
+        transactions: state.transactions.map(t =>
+          ids.has(t.id) ? { ...t, ...action.updates } : t
+        ),
+      }
+    }
+
     case 'SET_MERCHANT_OVERRIDE': {
       const { merchantKey, category, applyToExisting } = action
       const newOverrides = { ...state.merchantOverrides, [merchantKey]: category }

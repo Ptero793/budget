@@ -12,9 +12,44 @@ export default function TransactionsView() {
   const [showManual, setShowManual] = useState(false)
   const [manual, setManual] = useState({ date: '', description: '', amount: '', category: '' })
 
+  // ── Selection state ──────────────────────────────────────────────────────────
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [bulkCategory, setBulkCategory] = useState('')
+
   const monthTxs = filterByMonth(transactions, selectedMonth)
   const filtered = filterCat === 'all' ? monthTxs : monthTxs.filter(t => t.category === filterCat)
 
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  const selectAll = () => setSelectedIds(new Set(filtered.map(t => t.id)))
+  const clearSelection = () => { setSelectedIds(new Set()); setBulkCategory('') }
+
+  const allSelected = filtered.length > 0 && filtered.every(t => selectedIds.has(t.id))
+  const someSelected = selectedIds.size > 0
+
+  const handleBulkDelete = () => {
+    if (!window.confirm(`Delete ${selectedIds.size} transaction${selectedIds.size > 1 ? 's' : ''}?`)) return
+    dispatch({ type: 'DELETE_TRANSACTIONS', ids: [...selectedIds] })
+    clearSelection()
+  }
+
+  const handleBulkCategory = () => {
+    if (!bulkCategory) return
+    dispatch({
+      type: 'UPDATE_TRANSACTIONS',
+      ids: [...selectedIds],
+      updates: { category: bulkCategory, categorizationSource: 'manual' },
+    })
+    clearSelection()
+  }
+
+  // ── Manual entry ─────────────────────────────────────────────────────────────
   const handleAddManual = (e) => {
     e.preventDefault()
     const amount = parseFloat(manual.amount)
@@ -63,7 +98,7 @@ export default function TransactionsView() {
           <div className="ml-auto flex items-center gap-2">
             <select
               value={filterCat}
-              onChange={e => setFilterCat(e.target.value)}
+              onChange={e => { setFilterCat(e.target.value); clearSelection() }}
               className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="all">All categories</option>
@@ -129,7 +164,59 @@ export default function TransactionsView() {
           </form>
         )}
 
-        <TransactionTable transactions={filtered} />
+        {someSelected && (
+          <div className="flex flex-wrap items-center gap-3 px-4 py-2.5 bg-blue-50 border-b border-blue-100">
+            <span className="text-sm font-medium text-blue-700">
+              {selectedIds.size} selected
+            </span>
+            <button
+              onClick={selectAll}
+              className="text-xs text-blue-600 hover:text-blue-800 underline"
+            >
+              Select all {filtered.length}
+            </button>
+            <div className="ml-auto flex items-center gap-2">
+              <select
+                value={bulkCategory}
+                onChange={e => setBulkCategory(e.target.value)}
+                className="text-sm border border-blue-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+              >
+                <option value="">Set category…</option>
+                <option value="IGNORE">IGNORE</option>
+                {categories.filter(c => c !== 'UNCATEGORIZED' && c !== 'IGNORE').map(c =>
+                  <option key={c} value={c}>{c}</option>
+                )}
+              </select>
+              <button
+                onClick={handleBulkCategory}
+                disabled={!bulkCategory}
+                className="text-sm bg-blue-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Apply
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                className="text-sm bg-red-600 text-white rounded-lg px-3 py-1.5 font-medium hover:bg-red-700"
+              >
+                Delete
+              </button>
+              <button
+                onClick={clearSelection}
+                className="text-sm text-gray-400 hover:text-gray-600"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        )}
+
+        <TransactionTable
+          transactions={filtered}
+          selectedIds={selectedIds}
+          allSelected={allSelected}
+          onToggleSelect={toggleSelect}
+          onSelectAll={allSelected ? clearSelection : selectAll}
+        />
       </div>
     </div>
   )

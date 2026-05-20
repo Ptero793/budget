@@ -154,6 +154,18 @@ export async function syncAction(action, newState) {
       await supabase.from('transactions').delete().eq('id', action.id)
       break
 
+    case 'DELETE_TRANSACTIONS':
+      for (let i = 0; i < action.ids.length; i += 50) {
+        await supabase.from('transactions').delete().in('id', action.ids.slice(i, i + 50))
+      }
+      break
+
+    case 'UPDATE_TRANSACTIONS': {
+      const txs = newState.transactions.filter(t => action.ids.includes(t.id))
+      if (txs.length) await upsertChunked('transactions', txs.map(txToRow))
+      break
+    }
+
     case 'SET_MERCHANT_OVERRIDE': {
       const { merchantKey, category, applyToExisting } = action
       await supabase.from('merchant_overrides').upsert({ merchant_key: merchantKey, category })
