@@ -57,37 +57,55 @@ export function categorizeLocally(transactions, merchantOverrides) {
 }
 
 // Call the /api/categorize serverless function and return transactions with AI categories applied.
+// Splits large requests into batches so the model's response never exceeds max_tokens.
+const AI_BATCH_SIZE = 40
+
+async function categorizeBatch(batch, usableCategories) {
+  const response = await fetch('/api/categorize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      transactions: batch.map(t => ({ description: t.description, amount: t.amount })),
+      categories: usableCategories,
+    }),
+  })
+  if (!response.ok) throw new Error('AI categorization request failed')
+  return response.json()
+}
+
 export async function categorizeWithAI(transactions, categories) {
-  if (!transactions.length) return []
+  if (!transactions.length) return { transactions: [], usage: null }
 
   // Keep IGNORE in the list since we need the model to use it for payments/refunds.
   // Exclude UNCATEGORIZED so the model can't fall back to it.
   const usableCategories = categories.filter(c => c !== 'UNCATEGORIZED')
 
-  const response = await fetch('/api/categorize', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      transactions: transactions.map(t => ({
-        description: t.description,
-        amount: t.amount,
-      })),
-      categories: usableCategories,
-    }),
-  })
-
-  if (!response.ok) {
-    throw new Error('AI categorization request failed')
+  const batches = []
+  for (let i = 0; i < transactions.length; i += AI_BATCH_SIZE) {
+    batches.push(transactions.slice(i, i + AI_BATCH_SIZE))
   }
 
-  const { results, usage } = await response.json()
+  const responses = await Promise.all(batches.map(b => categorizeBatch(b, usableCategories)))
+  const allResults = responses.flatMap(r => r.results ?? [])
+
+  let totalUsage = null
+  for (const r of responses) {
+    if (!r.usage) continue
+    if (!totalUsage) {
+      totalUsage = { model: r.usage.model, input_tokens: 0, output_tokens: 0, cost_usd: 0, transaction_count: 0 }
+    }
+    totalUsage.input_tokens     += r.usage.input_tokens
+    totalUsage.output_tokens    += r.usage.output_tokens
+    totalUsage.cost_usd         += r.usage.cost_usd
+    totalUsage.transaction_count += r.usage.transaction_count
+  }
 
   const categorized = transactions.map((tx, i) => ({
     ...tx,
-    category: results[i]?.category || 'UNCATEGORIZED',
-    categorizationConfidence: results[i]?.confidence ?? null,
+    category: allResults[i]?.category || 'UNCATEGORIZED',
+    categorizationConfidence: allResults[i]?.confidence ?? null,
     categorizationSource: 'ai',
   }))
 
-  return { transactions: categorized, usage }
+  return { transactions: categorized, usage: totalUsage }
 }
