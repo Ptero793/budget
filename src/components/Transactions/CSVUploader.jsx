@@ -11,12 +11,6 @@ export default function CSVUploader() {
   const inputRef = useRef(null)
 
   const processFile = async (file) => {
-    if (!file?.name.toLowerCase().endsWith('.csv')) {
-      setStatus('error')
-      setMessage('Please upload a .csv file')
-      return
-    }
-
     setStatus('parsing')
     setMessage(`Parsing ${file.name}…`)
 
@@ -95,7 +89,7 @@ export default function CSVUploader() {
         <input
           ref={inputRef}
           type="file"
-          accept=".csv,.CSV"
+          accept=".csv,.CSV,text/csv,application/csv"
           onChange={handleFileChange}
           className="hidden"
         />
