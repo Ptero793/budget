@@ -1,6 +1,7 @@
 import { useState, useRef } from 'react'
 import { parseCSV } from '../../lib/csvParser'
 import { categorizeLocally, categorizeWithAI } from '../../lib/categorizer'
+import { logCategorizationCost } from '../../lib/db'
 import { useApp } from '../../context/AppContext'
 
 export default function CSVUploader() {
@@ -24,13 +25,14 @@ export default function CSVUploader() {
         setStatus('ai')
         setMessage(`Categorizing ${needsAI.length} transactions with AI…`)
         try {
-          const aiCategorized = await categorizeWithAI(needsAI, state.categories)
+          const { transactions: aiCategorized, usage } = await categorizeWithAI(needsAI, state.categories)
           final = [...ready, ...aiCategorized]
+          logCategorizationCost(usage) // fire and forget
         } catch {
           // AI failed — mark remaining as UNCATEGORIZED and continue
           final = [
             ...ready,
-            ...needsAI.map(t => ({ ...t, category: 'UNCATEGORIZED', categorizationSource: null })),
+            ...needsAI.map(t => ({ ...t, category: 'UNCATEGORIZED', categorizationSource: null, categorizationConfidence: null })),
           ]
         }
       }

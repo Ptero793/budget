@@ -5,7 +5,7 @@ import TransactionTable from './TransactionTable'
 import { transactionId } from '../../lib/utils'
 
 function downloadCSV(transactions) {
-  const headers = ['Date', 'Description', 'Amount', 'Category', 'Source', 'Categorization Source']
+  const headers = ['Date', 'Description', 'Amount', 'Category', 'Source', 'Categorization Source', 'Confidence']
   const rows = transactions.map(t => [
     t.date,
     `"${(t.description || '').replace(/"/g, '""')}"`,
@@ -13,6 +13,7 @@ function downloadCSV(transactions) {
     t.category || 'UNCATEGORIZED',
     t.source,
     t.categorizationSource || '',
+    t.categorizationConfidence != null ? t.categorizationConfidence.toFixed(2) : '',
   ])
   const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })

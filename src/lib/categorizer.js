@@ -78,11 +78,14 @@ export async function categorizeWithAI(transactions, categories) {
     throw new Error('AI categorization request failed')
   }
 
-  const { categories: aiCategories } = await response.json()
+  const { results, usage } = await response.json()
 
-  return transactions.map((tx, i) => ({
+  const categorized = transactions.map((tx, i) => ({
     ...tx,
-    category: aiCategories[i] || 'UNCATEGORIZED',
+    category: results[i]?.category || 'UNCATEGORIZED',
+    categorizationConfidence: results[i]?.confidence ?? null,
     categorizationSource: 'ai',
   }))
+
+  return { transactions: categorized, usage }
 }

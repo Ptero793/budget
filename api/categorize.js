@@ -1,5 +1,10 @@
 import Anthropic from '@anthropic-ai/sdk'
 
+const MODEL = 'claude-sonnet-4-6'
+// Pricing as of 2025: $3/MTok input, $15/MTok output
+const COST_PER_INPUT_TOKEN  = 3.0  / 1_000_000
+const COST_PER_OUTPUT_TOKEN = 15.0 / 1_000_000
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY })
 
 export default async function handler(req, res) {
@@ -25,9 +30,16 @@ export default async function handler(req, res) {
     const categoryList = categories.join(', ')
 
     const message = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: MODEL,
       max_tokens: 4096,
-      system: `You are a personal finance assistant. Categorize credit card transactions into the provided categories. Return ONLY a JSON array of strings — one category per transaction, same order, same count. No explanation, no markdown, just the raw JSON array.`,
+      system: `You are a personal finance assistant. Categorize each credit card transaction into the best-matching category from the provided list.
+
+Return ONLY a JSON array with one object per transaction, in the same order as the input. No explanation, no markdown — raw JSON only.
+
+Response format:
+[{"category": "CATEGORY_NAME", "confidence": 0.95}, ...]
+
+confidence is a float from 0.0 to 1.0 representing your certainty. Use values close to 1.0 when the merchant is unambiguous, and lower values when you are guessing.`,
       messages: [
         {
           role: 'user',
@@ -38,39 +50,40 @@ ${transactionList}
 
 Rules:
 - Pick the single best category from the list above
-- TST* and similar prefixes indicate restaurant/cafe purchases → DRINKS & EATING OUT
+- TST* and similar prefixes indicate restaurant or cafe purchases → DRINKS & EATING OUT
 - AMZN, AMAZON → SHOPPING
-- Airlines, hotels, Airbnb → TRAVEL
-- Grocery stores, markets, bakeries → GROCERIES
+- Airlines, hotels, Airbnb, travel agencies → TRAVEL
+- Grocery stores, markets, bakeries, food delivery → GROCERIES
 - IGNORE for credit card payments, transfers, refunds
-- Use UNCATEGORIZED only as a last resort — make your best guess
+- Use UNCATEGORIZED only as a last resort — always make your best guess and reflect low certainty in the confidence score instead
 
-Respond with exactly ${transactions.length} items: ["CAT1", "CAT2", ...]`,
+Respond with exactly ${transactions.length} objects: [{"category": "...", "confidence": 0.0}, ...]`,
         },
       ],
     })
 
     const text = message.content[0]?.text ?? ''
     const match = text.match(/\[[\s\S]*\]/)
-    if (!match) {
-      throw new Error('Model did not return a valid JSON array')
-    }
+    if (!match) throw new Error('Model did not return a valid JSON array')
 
     const result = JSON.parse(match[0])
-    if (!Array.isArray(result)) {
-      throw new Error('Response is not an array')
-    }
+    if (!Array.isArray(result)) throw new Error('Response is not an array')
 
-    // Pad or trim to match transaction count rather than failing the whole batch
-    while (result.length < transactions.length) result.push('UNCATEGORIZED')
+    while (result.length < transactions.length) result.push({ category: 'UNCATEGORIZED', confidence: 0 })
     result.length = transactions.length
 
-    res.status(200).json({ categories: result })
+    const { input_tokens, output_tokens } = message.usage
+    const cost_usd = input_tokens * COST_PER_INPUT_TOKEN + output_tokens * COST_PER_OUTPUT_TOKEN
+
+    res.status(200).json({
+      results: result,
+      usage: { model: MODEL, input_tokens, output_tokens, cost_usd, transaction_count: transactions.length },
+    })
   } catch (err) {
     console.error('[categorize]', err.message)
-    // Return UNCATEGORIZED for all on failure so the import still completes
     res.status(200).json({
-      categories: transactions.map(() => 'UNCATEGORIZED'),
+      results: transactions.map(() => ({ category: 'UNCATEGORIZED', confidence: 0 })),
+      usage: null,
       warning: err.message,
     })
   }
