@@ -95,7 +95,7 @@ export default function CSVUploader() {
         <input
           ref={inputRef}
           type="file"
-          accept=".csv"
+          accept=".csv,.CSV"
           onChange={handleFileChange}
           className="hidden"
         />
