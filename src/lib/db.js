@@ -16,6 +16,9 @@ function rowToTx(row) {
     categorizationConfidence: row.categorization_confidence != null
       ? parseFloat(row.categorization_confidence)
       : null,
+    categorizationCostUsd: row.categorization_cost_usd != null
+      ? parseFloat(row.categorization_cost_usd)
+      : null,
   }
 }
 
@@ -29,6 +32,7 @@ function txToRow(tx) {
     source: tx.source,
     categorization_source: tx.categorizationSource,
     categorization_confidence: tx.categorizationConfidence ?? null,
+    categorization_cost_usd: tx.categorizationCostUsd ?? null,
   }
 }
 
