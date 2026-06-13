@@ -8,9 +8,13 @@ function topTransactionInCategory(transactions, category) {
   return txs[0] || null
 }
 
+function getEffectiveBudget(budgetTargets, budgetOverrides, category, month) {
+  return budgetOverrides[month]?.[category] ?? budgetTargets[category]?.amount ?? 0
+}
+
 export default function InsightsView() {
   const { state } = useApp()
-  const { transactions, budgetTargets, incomeActuals, selectedMonth, incomeSources } = state
+  const { transactions, budgetTargets, budgetOverrides, incomeActuals, selectedMonth } = state
 
   const month = selectedMonth === 'all'
     ? new Date().toISOString().slice(0, 7)
@@ -19,31 +23,45 @@ export default function InsightsView() {
   const monthTxs = filterByMonth(transactions, month)
   const actuals = computeActuals(monthTxs)
 
-  const totalBudget = Object.entries(budgetTargets)
-    .filter(([cat]) => cat !== 'IGNORE' && cat !== 'UNCATEGORIZED')
-    .reduce((sum, [, v]) => sum + v.amount, 0)
+  // Build the universe of categories: anything with a budget OR any actual spend.
+  const allCategories = new Set([
+    ...Object.keys(budgetTargets).filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED'),
+    ...Object.keys(actuals).filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED'),
+  ])
 
-  const totalActual = Object.values(actuals).reduce((s, v) => s + v, 0)
+  const totalBudget = [...allCategories].reduce(
+    (sum, cat) => sum + getEffectiveBudget(budgetTargets, budgetOverrides, cat, month),
+    0
+  )
+  const totalActual = Object.entries(actuals)
+    .filter(([cat]) => cat !== 'IGNORE' && cat !== 'UNCATEGORIZED')
+    .reduce((s, [, v]) => s + v, 0)
   const netVariance = totalBudget - totalActual
   const isOverBudget = netVariance < 0
 
   const totalIncome = Object.values(incomeActuals[month] || {}).reduce((s, v) => s + v, 0)
   const netSavings = totalIncome - totalActual
 
-  // Compute variance per category and find drivers
-  const drivers = Object.entries(budgetTargets)
-    .filter(([cat]) => cat !== 'IGNORE' && cat !== 'UNCATEGORIZED')
-    .map(([category, { amount: budget }]) => {
-      const actual = actuals[category] || 0
-      const variance = budget - actual // positive = under budget
-      const topTx = topTransactionInCategory(monthTxs, category)
-      return { category, budget, actual, variance, topTx }
-    })
-    .filter(d => d.actual > 0 || d.budget > 0)
-    .sort((a, b) => Math.abs(a.variance) - Math.abs(b.variance))
+  // Per-category variance — using effective budget (with month overrides)
+  const drivers = [...allCategories].map(category => {
+    const budget = getEffectiveBudget(budgetTargets, budgetOverrides, category, month)
+    const actual = actuals[category] || 0
+    const variance = budget - actual // negative = over budget
+    const topTx = topTransactionInCategory(monthTxs, category)
+    return { category, budget, actual, variance, topTx }
+  })
 
-  const overDrivers = drivers.filter(d => d.variance < 0).slice(0, 5)
-  const underDrivers = drivers.filter(d => d.variance > 0 && d.actual > 0).slice(0, 3)
+  // Over: most negative variance first (biggest overspend at the top)
+  const overDrivers = drivers
+    .filter(d => d.variance < 0)
+    .sort((a, b) => a.variance - b.variance)
+    .slice(0, 5)
+
+  // Under: most positive variance first, but only categories where we actually spent something
+  const underDrivers = drivers
+    .filter(d => d.variance > 0 && d.actual > 0)
+    .sort((a, b) => b.variance - a.variance)
+    .slice(0, 3)
 
   if (!monthTxs.length) {
     return (
@@ -54,6 +72,8 @@ export default function InsightsView() {
       </div>
     )
   }
+
+  const uncategorizedCount = monthTxs.filter(t => !t.category || t.category === 'UNCATEGORIZED').length
 
   return (
     <div className="space-y-4">
@@ -114,9 +134,9 @@ export default function InsightsView() {
       )}
 
       {/* Uncategorized warning */}
-      {monthTxs.filter(t => !t.category || t.category === 'UNCATEGORIZED').length > 0 && (
+      {uncategorizedCount > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
-          <strong>Note:</strong> {monthTxs.filter(t => !t.category || t.category === 'UNCATEGORIZED').length} transactions are uncategorized and excluded from these insights. Review them in the Transactions tab.
+          <strong>Note:</strong> {uncategorizedCount} transactions are uncategorized and excluded from these insights. Review them in the Transactions tab.
         </div>
       )}
     </div>
@@ -126,6 +146,7 @@ export default function InsightsView() {
 function DriverRow({ driver, type }) {
   const { category, budget, actual, variance, topTx } = driver
   const isOver = type === 'over'
+  const noBudget = budget === 0
 
   return (
     <div className="px-4 py-4">
@@ -136,6 +157,11 @@ function DriverRow({ driver, type }) {
             <span className={`text-sm font-bold ${isOver ? 'text-red-600' : 'text-green-600'}`}>
               {isOver ? '▲' : '▼'} {formatCurrency(Math.abs(variance))} {isOver ? 'over' : 'under'}
             </span>
+            {noBudget && isOver && (
+              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">
+                no budget set
+              </span>
+            )}
           </div>
           <div className="flex gap-4 mt-1 text-xs text-gray-500">
             <span>Budget: <strong className="text-gray-700">{formatCurrency(budget)}</strong></span>
