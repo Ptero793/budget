@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useApp, filterByMonth } from '../../context/AppContext'
 import CSVUploader from './CSVUploader'
+import SimpleFINPanel from './SimpleFINPanel'
 import TransactionTable from './TransactionTable'
 import { transactionId } from '../../lib/utils'
 
@@ -105,8 +106,9 @@ export default function TransactionsView() {
           </button>
         </div>
         {showUploader && (
-          <div className="p-4">
+          <div className="p-4 space-y-3">
             <CSVUploader />
+            <SimpleFINPanel />
           </div>
         )}
       </div>
