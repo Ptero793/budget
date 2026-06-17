@@ -63,11 +63,19 @@ export default async function handler(req, res) {
       : Math.floor(Date.now() / 1000) - 30 * 86400
     const endSec = Math.floor(Date.now() / 1000)
 
-    const url = new URL(conn.access_url.replace(/\/$/, '') + '/accounts')
-    url.searchParams.set('start-date', String(startSec))
-    url.searchParams.set('end-date', String(endSec))
+    // SimpleFIN access URLs embed creds (https://user:pass@host/...).
+    // Node's fetch (undici) refuses URLs with credentials, so extract them
+    // into a Basic auth header and request the cleaned URL.
+    const parsed = new URL(conn.access_url.replace(/\/$/, '') + '/accounts')
+    const basicAuth = Buffer.from(`${parsed.username}:${parsed.password}`).toString('base64')
+    parsed.username = ''
+    parsed.password = ''
+    parsed.searchParams.set('start-date', String(startSec))
+    parsed.searchParams.set('end-date', String(endSec))
 
-    const sfRes = await fetch(url.toString())
+    const sfRes = await fetch(parsed.toString(), {
+      headers: { Authorization: `Basic ${basicAuth}` },
+    })
     if (!sfRes.ok) {
       const body = await sfRes.text()
       throw new Error(`SimpleFIN /accounts ${sfRes.status}: ${body.slice(0, 200)}`)
