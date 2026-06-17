@@ -217,6 +217,26 @@ export async function syncAction(action, newState) {
         .eq('month', action.month)
       break
 
+    case 'UPDATE_BUDGET_DEFAULT_FROM_MONTH': {
+      const { category, amount, fromMonth, frozenMonths, oldDefault } = action
+      await supabase.from('budget_targets').upsert({
+        category,
+        amount,
+        type: newState.budgetTargets[category]?.type ?? 'variable',
+      })
+      if (frozenMonths.length > 0) {
+        await upsertChunked(
+          'budget_overrides',
+          frozenMonths.map(m => ({ category, month: m, amount: oldDefault }))
+        )
+      }
+      await supabase.from('budget_overrides')
+        .delete()
+        .eq('category', category)
+        .eq('month', fromMonth)
+      break
+    }
+
     case 'ADD_CATEGORY': {
       const name = action.category.toUpperCase().trim()
       await Promise.all([

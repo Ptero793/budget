@@ -1,12 +1,27 @@
 import { useState } from 'react'
 import { useApp, filterByMonth, computeActuals } from '../../context/AppContext'
-import { formatCurrency } from '../../lib/utils'
+import { formatCurrency, formatMonth } from '../../lib/utils'
 
 function getEffectiveBudget(budgetTargets, budgetOverrides, category, month) {
   return budgetOverrides[month]?.[category] ?? budgetTargets[category]?.amount ?? 0
 }
 
+// Months strictly before `fromMonth` that have any prior activity and no existing
+// override for this category. We freeze these so changing the default forward
+// doesn't retroactively change historical reports.
+function frozenMonthsBefore(state, category, fromMonth) {
+  const known = new Set([
+    ...Object.keys(state.budgetOverrides),
+    ...Object.keys(state.incomeActuals),
+    ...state.transactions.map(t => t.date.slice(0, 7)),
+  ])
+  return [...known].filter(
+    m => m < fromMonth && state.budgetOverrides[m]?.[category] === undefined
+  )
+}
+
 function BudgetCell({ category, budgetTargets, budgetOverrides, selectedMonth, dispatch }) {
+  const { state } = useApp()
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
 
@@ -18,35 +33,89 @@ function BudgetCell({ category, budgetTargets, budgetOverrides, selectedMonth, d
     : defaultAmount
 
   const start = () => { setDraft(String(effectiveAmount)); setEditing(true) }
-  const commit = () => {
+  const cancel = () => setEditing(false)
+
+  const parsed = () => {
     const v = parseFloat(draft)
-    if (!isNaN(v) && v >= 0) {
+    return !isNaN(v) && v >= 0 ? v : null
+  }
+
+  const commitForMonth = () => {
+    const v = parsed()
+    if (v !== null) {
+      dispatch({ type: 'SET_BUDGET_OVERRIDE', category, month: selectedMonth, amount: v })
+    }
+    setEditing(false)
+  }
+
+  const commitAsDefault = () => {
+    const v = parsed()
+    if (v !== null) {
       if (isSpecificMonth) {
-        dispatch({ type: 'SET_BUDGET_OVERRIDE', category, month: selectedMonth, amount: v })
+        const frozenMonths = frozenMonthsBefore(state, category, selectedMonth)
+        dispatch({
+          type: 'UPDATE_BUDGET_DEFAULT_FROM_MONTH',
+          category,
+          amount: v,
+          fromMonth: selectedMonth,
+          frozenMonths,
+          oldDefault: defaultAmount,
+        })
       } else {
         dispatch({ type: 'SET_BUDGET_TARGET', category, amount: v })
       }
     }
     setEditing(false)
   }
+
   const clearOverride = (e) => {
     e.stopPropagation()
     dispatch({ type: 'REMOVE_BUDGET_OVERRIDE', category, month: selectedMonth })
   }
 
   if (editing) {
+    const primary = isSpecificMonth ? commitForMonth : commitAsDefault
     return (
-      <input
-        autoFocus
-        type="number"
-        min="0"
-        step="1"
-        value={draft}
-        onChange={e => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
-        className="w-24 text-right text-sm border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
-      />
+      <div className="flex flex-col items-end gap-1" onKeyDown={e => { if (e.key === 'Escape') cancel() }}>
+        <input
+          autoFocus
+          type="number"
+          min="0"
+          step="1"
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') primary() }}
+          className="w-24 text-right text-sm border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+        />
+        {isSpecificMonth ? (
+          <div className="flex flex-col gap-0.5 text-[11px]">
+            <button
+              onClick={commitForMonth}
+              className="px-1.5 py-0.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Save for {formatMonth(selectedMonth)}
+            </button>
+            <button
+              onClick={commitAsDefault}
+              title="Sets the new default from this month forward. Past months are pinned to the current default so historical reports don't change."
+              className="px-1.5 py-0.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+            >
+              Save as default
+            </button>
+            <button onClick={cancel} className="text-gray-400 hover:text-gray-600">Cancel</button>
+          </div>
+        ) : (
+          <div className="flex gap-1 text-[11px]">
+            <button
+              onClick={commitAsDefault}
+              className="px-1.5 py-0.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+            >
+              Save
+            </button>
+            <button onClick={cancel} className="px-1.5 py-0.5 text-gray-400 hover:text-gray-600">Cancel</button>
+          </div>
+        )}
+      </div>
     )
   }
 

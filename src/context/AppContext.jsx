@@ -94,6 +94,31 @@ function reducer(state, action) {
       }
     }
 
+    // Update default budget for a category effective `fromMonth` forward.
+    // Past months with prior activity get frozen at the old default via overrides
+    // so historical reports don't shift. Override for fromMonth (if any) is removed
+    // so the new default applies cleanly to the current view.
+    case 'UPDATE_BUDGET_DEFAULT_FROM_MONTH': {
+      const { category, amount, fromMonth, frozenMonths, oldDefault } = action
+      const type = state.budgetTargets[category]?.type ?? 'variable'
+
+      const newOverrides = { ...state.budgetOverrides }
+      for (const m of frozenMonths) {
+        newOverrides[m] = { ...newOverrides[m], [category]: oldDefault }
+      }
+      if (newOverrides[fromMonth]?.[category] !== undefined) {
+        const monthCopy = { ...newOverrides[fromMonth] }
+        delete monthCopy[category]
+        newOverrides[fromMonth] = monthCopy
+      }
+
+      return {
+        ...state,
+        budgetTargets: { ...state.budgetTargets, [category]: { amount, type } },
+        budgetOverrides: newOverrides,
+      }
+    }
+
     case 'REMOVE_BUDGET_OVERRIDE': {
       const monthOverrides = { ...state.budgetOverrides[action.month] }
       delete monthOverrides[action.category]
