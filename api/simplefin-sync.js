@@ -28,6 +28,19 @@ function isPayment(description, amount) {
   return amount < 0 && /payment|autopay|thank you/i.test(description)
 }
 
+// Mirrors src/lib/utils.js normalizeMerchant(). Inline to avoid importing
+// from src/ into the serverless bundle.
+function normalizeMerchant(description) {
+  const cleaned = (description || '')
+    .toUpperCase()
+    .replace(/\*\S*/g, '')
+    .replace(/#\d+\s*/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const words = cleaned.split(' ').filter(w => w.length > 1)
+  return words.slice(0, 2).join(' ')
+}
+
 async function categorizeViaApi(req, transactions, categories) {
   const host = process.env.VERCEL_URL || req.headers.host
   const proto = host?.includes('localhost') ? 'http' : 'https'
@@ -107,7 +120,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // Drop any IDs that already exist
+    // Drop any IDs that already exist (exact-hash match)
     let existingIds = new Set()
     if (txs.length > 0) {
       const ids = txs.map(t => t.id)
@@ -118,7 +131,31 @@ export default async function handler(req, res) {
       if (exErr) throw new Error(`existing-id check: ${exErr.message}`)
       existingIds = new Set((existing ?? []).map(r => r.id))
     }
-    const newTxs = txs.filter(t => !existingIds.has(t.id))
+
+    // Fuzzy dedup against earlier CSV uploads where the description string
+    // differs (Chase CSV "AMAZON.COM*ABC123" vs SimpleFIN "Amazon.com") but
+    // it's the same purchase. Match on source + amount + date + normalized
+    // merchant. Exact date — same-amount same-merchant repeats on different
+    // days are kept as distinct.
+    let fuzzyKeys = new Set()
+    const candidateRows = txs.filter(t => !existingIds.has(t.id))
+    if (candidateRows.length > 0) {
+      const dates = [...new Set(candidateRows.map(t => t.date))]
+      const { data: existingForDates, error: fzErr } = await supabase
+        .from('transactions')
+        .select('date, description, amount, source')
+        .in('date', dates)
+      if (fzErr) throw new Error(`fuzzy-dedup check: ${fzErr.message}`)
+      for (const r of existingForDates ?? []) {
+        const key = `${r.source}|${r.date}|${Math.round(parseFloat(r.amount) * 100)}|${normalizeMerchant(r.description)}`
+        fuzzyKeys.add(key)
+      }
+    }
+
+    const newTxs = candidateRows.filter(t => {
+      const key = `${t.source}|${t.date}|${Math.round(t.amount * 100)}|${normalizeMerchant(t.description)}`
+      return !fuzzyKeys.has(key)
+    })
 
     // AI categorize the un-flagged remainder
     const needsCategorize = newTxs.filter(t => t.category === null)
@@ -164,6 +201,8 @@ export default async function handler(req, res) {
       ok: true,
       imported: newTxs.length,
       duplicates: txs.length - newTxs.length,
+      exact_dupes: existingIds.size,
+      fuzzy_dupes: candidateRows.length - newTxs.length,
       ai_categorized: aiCategorized,
     })
   } catch (err) {
