@@ -354,9 +354,7 @@ export default function BudgetView() {
 function CategoryPreview({ category, transactions, selectedMonth, onClose }) {
   const sorted = [...transactions].sort((a, b) => (a.date < b.date ? 1 : -1))
   const total = sorted.reduce((s, t) => s + t.amount, 0)
-  const label = selectedMonth && selectedMonth !== 'all'
-    ? new Date(selectedMonth + '-01T00:00:00Z').toLocaleString('en-US', { month: 'long', year: 'numeric' })
-    : 'All months'
+  const label = selectedMonth === 'all' ? 'All months' : formatMonth(selectedMonth)
 
   return (
     <div
