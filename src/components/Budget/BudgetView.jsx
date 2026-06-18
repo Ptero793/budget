@@ -237,15 +237,15 @@ export default function BudgetView() {
       : (budgetTargets[c]?.amount ?? 0),
   })
 
+  // Show every category the user has set up, even at $0 budget. Categories
+  // only disappear when the user explicitly removes them (per item 3 below).
   const fixedRows = allCats
     .filter(c => budgetTargets[c]?.type === 'fixed')
     .map(toRow)
-    .filter(r => r.effectiveAmount > 0 || actuals[r.category])
 
   const variableRows = allCats
     .filter(c => !budgetTargets[c] || budgetTargets[c].type === 'variable')
     .map(toRow)
-    .filter(r => r.effectiveAmount > 0 || actuals[r.category])
 
   const totalBudget = [...fixedRows, ...variableRows].reduce((s, r) => s + r.effectiveAmount, 0)
   const totalActual = Object.values(actuals).reduce((s, v) => s + v, 0)

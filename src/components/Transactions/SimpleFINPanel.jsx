@@ -16,6 +16,7 @@ export default function SimpleFINPanel() {
   const [token, setToken] = useState('')
   const [status, setStatus] = useState(null)
   const [message, setMessage] = useState('')
+  const [debugData, setDebugData] = useState(null)
 
   const loadConnection = async () => {
     const { data } = await supabase.from('simplefin_connection').select('*').eq('id', 1).maybeSingle()
@@ -62,6 +63,27 @@ export default function SimpleFINPanel() {
       )
       await loadConnection()
       // Supabase real-time subscription in AppContext will pick up new rows.
+    } catch (err) {
+      setStatus('error')
+      setMessage(err.message)
+    }
+  }
+
+  const inspectSimpleFIN = async () => {
+    setStatus('inspecting')
+    setMessage('Pulling raw data from SimpleFIN…')
+    setDebugData(null)
+    try {
+      const res = await fetch('/api/simplefin-debug', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: 14 }),
+      })
+      const body = await res.json()
+      if (!res.ok) throw new Error(body.error || 'Inspect failed')
+      setDebugData(body)
+      setStatus('done')
+      setMessage(`Pulled ${body.accounts.reduce((s, a) => s + a.transaction_count, 0)} transactions from the last ${body.window.days} days`)
     } catch (err) {
       setStatus('error')
       setMessage(err.message)
@@ -119,17 +141,75 @@ export default function SimpleFINPanel() {
           <span className="text-xs text-gray-600">
             Last synced: <strong className="text-gray-800">{timeAgo(connection.last_synced_at)}</strong>
           </span>
-          <button
-            onClick={syncNow}
-            disabled={status === 'syncing'}
-            className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300"
-          >
-            {status === 'syncing' ? 'Syncing…' : 'Sync now'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={inspectSimpleFIN}
+              disabled={status === 'inspecting' || status === 'syncing'}
+              className="px-3 py-1.5 text-xs font-medium rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              title="Show the raw 14-day transaction list from SimpleFIN without saving"
+            >
+              {status === 'inspecting' ? 'Loading…' : 'Inspect'}
+            </button>
+            <button
+              onClick={syncNow}
+              disabled={status === 'syncing'}
+              className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300"
+            >
+              {status === 'syncing' ? 'Syncing…' : 'Sync now'}
+            </button>
+          </div>
         </div>
       )}
 
-      {message && (status === 'done' || status === 'error' || status === 'syncing' || status === 'connecting') && (
+      {debugData && (
+        <div className="mt-3 border border-gray-200 rounded bg-white max-h-80 overflow-y-auto">
+          <div className="flex items-center justify-between px-3 py-1.5 border-b border-gray-100 bg-gray-50 sticky top-0">
+            <span className="text-xs font-medium text-gray-700">
+              Raw SimpleFIN data · {debugData.window.start_date} → {debugData.window.end_date}
+            </span>
+            <button
+              onClick={() => setDebugData(null)}
+              className="text-gray-400 hover:text-gray-600 text-sm"
+            >
+              ✕
+            </button>
+          </div>
+          {debugData.accounts.map((acct, ai) => (
+            <div key={ai} className="px-3 py-2 border-b border-gray-100 last:border-b-0">
+              <p className="text-xs font-semibold text-gray-800">
+                {acct.org} · {acct.name}
+                <span className="ml-2 font-normal text-gray-500">({acct.transaction_count} txs)</span>
+              </p>
+              {acct.transactions.length > 0 && (
+                <table className="w-full mt-1.5 text-[11px]">
+                  <thead className="text-gray-400">
+                    <tr>
+                      <th className="text-left font-normal pr-2">transacted_at</th>
+                      <th className="text-left font-normal pr-2">posted</th>
+                      <th className="text-left font-normal pr-2">pending</th>
+                      <th className="text-right font-normal pr-2">amount</th>
+                      <th className="text-left font-normal">payee / description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {acct.transactions.map((t, i) => (
+                      <tr key={i} className="text-gray-700">
+                        <td className="pr-2 font-mono">{t.transacted_at || '—'}</td>
+                        <td className="pr-2 font-mono">{t.posted || '—'}</td>
+                        <td className="pr-2">{t.pending ? 'yes' : ''}</td>
+                        <td className="pr-2 text-right font-mono">{t.amount.toFixed(2)}</td>
+                        <td className="truncate max-w-xs">{t.payee || t.description}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {message && (status === 'done' || status === 'error' || status === 'syncing' || status === 'connecting' || status === 'inspecting') && (
         <div
           className={`mt-2 text-xs rounded px-2 py-1.5 ${
             status === 'error' ? 'bg-red-50 text-red-700' :
