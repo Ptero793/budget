@@ -10,8 +10,8 @@ import IncomeView from './components/Income/IncomeView'
 import InsightsView from './components/Insights/InsightsView'
 
 const TABS = [
-  { id: 'transactions', label: 'Transactions' },
   { id: 'budget',       label: 'Budget' },
+  { id: 'transactions', label: 'Transactions' },
   { id: 'income',       label: 'Income' },
   { id: 'insights',     label: 'Insights' },
 ]
@@ -28,7 +28,7 @@ function LoadingScreen() {
 }
 
 function AppShell({ onSignOut }) {
-  const [activeTab, setActiveTab] = useState('transactions')
+  const [activeTab, setActiveTab] = useState('budget')
   const { isLoading, dbError } = useApp()
 
   if (isLoading) return <LoadingScreen />

@@ -88,7 +88,7 @@ export default function TransactionTable({ transactions, selectedIds, allSelecte
             </th>
             <Th field="date" label="Date" className="w-28" />
             <Th field="description" label="Description" />
-            <th className="py-3 px-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide">Category</th>
+            <Th field="category" label="Category" />
             <Th field="amount" label="Amount" className="text-right w-28" />
             <th className="py-3 px-4 text-center text-xs font-semibold text-gray-500 uppercase tracking-wide w-20">Source</th>
             <th className="py-3 px-4 w-12"></th>

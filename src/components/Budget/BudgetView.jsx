@@ -145,7 +145,7 @@ function BudgetCell({ category, budgetTargets, budgetOverrides, selectedMonth, d
   )
 }
 
-function SectionRows({ rows, actuals, budgetTargets, budgetOverrides, selectedMonth, dispatch }) {
+function SectionRows({ rows, actuals, budgetTargets, budgetOverrides, selectedMonth, dispatch, onShowCategory }) {
   const totalBudget = rows.reduce((s, r) => s + r.effectiveAmount, 0)
   const totalActual = rows.reduce((s, r) => s + (actuals[r.category] || 0), 0)
   const totalVariance = totalBudget - totalActual
@@ -161,7 +161,15 @@ function SectionRows({ rows, actuals, budgetTargets, budgetOverrides, selectedMo
 
         return (
           <tr key={row.category} className="hover:bg-gray-50 group transition-colors">
-            <td className="py-2.5 px-4 text-gray-800 font-medium">{row.category}</td>
+            <td className="py-2.5 px-4 text-gray-800 font-medium">
+              <button
+                onClick={() => onShowCategory(row.category)}
+                className="text-left hover:text-blue-700 hover:underline decoration-dashed underline-offset-2"
+                title={`See ${row.category} transactions for this month`}
+              >
+                {row.category}
+              </button>
+            </td>
             <td className="py-2.5 px-4 text-right">
               <BudgetCell
                 category={row.category}
@@ -169,6 +177,7 @@ function SectionRows({ rows, actuals, budgetTargets, budgetOverrides, selectedMo
                 budgetOverrides={budgetOverrides}
                 selectedMonth={selectedMonth}
                 dispatch={dispatch}
+                onShowCategory={setPreviewCategory}
               />
             </td>
             <td className={`py-2.5 px-4 text-right font-mono text-sm ${actual !== 0 ? 'text-gray-900' : 'text-gray-300'}`}>
@@ -213,6 +222,7 @@ function SectionRows({ rows, actuals, budgetTargets, budgetOverrides, selectedMo
 export default function BudgetView() {
   const { state, dispatch } = useApp()
   const { transactions, budgetTargets, budgetOverrides, selectedMonth, categories } = state
+  const [previewCategory, setPreviewCategory] = useState(null)
 
   const monthTxs = filterByMonth(transactions, selectedMonth)
   const actuals = computeActuals(monthTxs)
@@ -285,6 +295,7 @@ export default function BudgetView() {
                 budgetOverrides={budgetOverrides}
                 selectedMonth={selectedMonth}
                 dispatch={dispatch}
+                onShowCategory={setPreviewCategory}
               />
             </tbody>
           )}
@@ -303,6 +314,7 @@ export default function BudgetView() {
                 budgetOverrides={budgetOverrides}
                 selectedMonth={selectedMonth}
                 dispatch={dispatch}
+                onShowCategory={setPreviewCategory}
               />
             </tbody>
           )}
@@ -324,9 +336,73 @@ export default function BudgetView() {
       </div>
 
       <p className="px-4 py-2 text-xs text-gray-400 border-t border-gray-100">
-        Click any budget amount to edit
+        Click any budget amount to edit · Click a category name to preview its transactions
         {isSpecificMonth ? ' · Changes this month only · Edit in "All" view to change the default' : ' · Sets the default for all months'}
       </p>
+
+      {previewCategory && (
+        <CategoryPreview
+          category={previewCategory}
+          transactions={monthTxs.filter(t => t.category === previewCategory)}
+          selectedMonth={selectedMonth}
+          onClose={() => setPreviewCategory(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+function CategoryPreview({ category, transactions, selectedMonth, onClose }) {
+  const sorted = [...transactions].sort((a, b) => (a.date < b.date ? 1 : -1))
+  const total = sorted.reduce((s, t) => s + t.amount, 0)
+  const label = selectedMonth && selectedMonth !== 'all'
+    ? new Date(selectedMonth + '-01T00:00:00Z').toLocaleString('en-US', { month: 'long', year: 'numeric' })
+    : 'All months'
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] flex flex-col"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h3 className="font-semibold text-gray-900">{category}</h3>
+            <p className="text-xs text-gray-500 mt-0.5">{label} · {sorted.length} transactions · {formatCurrency(total)}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div className="overflow-y-auto">
+          {sorted.length === 0 ? (
+            <p className="text-center text-sm text-gray-400 py-10">No transactions in {category} this month.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <tbody className="divide-y divide-gray-100">
+                {sorted.map(t => (
+                  <tr key={t.id} className="hover:bg-gray-50">
+                    <td className="py-2 px-5 text-xs text-gray-500 whitespace-nowrap w-24">{t.date}</td>
+                    <td className="py-2 px-3 text-gray-800">
+                      <span className="block truncate" title={t.description}>{t.description}</span>
+                    </td>
+                    <td className={`py-2 px-5 text-right font-mono whitespace-nowrap w-24 ${t.amount < 0 ? 'text-green-600' : 'text-gray-900'}`}>
+                      {formatCurrency(t.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
     </div>
   )
 }

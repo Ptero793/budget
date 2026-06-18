@@ -31,6 +31,7 @@ export default function TransactionsView() {
   const { state, dispatch } = useApp()
   const { transactions, selectedMonth, categories } = state
   const [filterCat, setFilterCat] = useState('all')
+  const [search, setSearch] = useState('')
   const [showUploader, setShowUploader] = useState(true)
   const [showManual, setShowManual] = useState(false)
   const [manual, setManual] = useState({ date: '', description: '', amount: '', category: '' })
@@ -40,7 +41,10 @@ export default function TransactionsView() {
   const [bulkCategory, setBulkCategory] = useState('')
 
   const monthTxs = filterByMonth(transactions, selectedMonth)
-  const filtered = filterCat === 'all' ? monthTxs : monthTxs.filter(t => t.category === filterCat)
+  const searchQ = search.trim().toLowerCase()
+  const filtered = monthTxs
+    .filter(t => filterCat === 'all' || t.category === filterCat)
+    .filter(t => !searchQ || (t.description || '').toLowerCase().includes(searchQ))
 
   const toggleSelect = (id) => {
     setSelectedIds(prev => {
@@ -120,6 +124,13 @@ export default function TransactionsView() {
             <span className="ml-2 text-sm font-normal text-gray-400">({monthTxs.length})</span>
           </h2>
           <div className="ml-auto flex items-center gap-2">
+            <input
+              type="text"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Search description…"
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-44"
+            />
             <select
               value={filterCat}
               onChange={e => { setFilterCat(e.target.value); clearSelection() }}
