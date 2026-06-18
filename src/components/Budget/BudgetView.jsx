@@ -177,7 +177,6 @@ function SectionRows({ rows, actuals, budgetTargets, budgetOverrides, selectedMo
                 budgetOverrides={budgetOverrides}
                 selectedMonth={selectedMonth}
                 dispatch={dispatch}
-                onShowCategory={setPreviewCategory}
               />
             </td>
             <td className={`py-2.5 px-4 text-right font-mono text-sm ${actual !== 0 ? 'text-gray-900' : 'text-gray-300'}`}>
