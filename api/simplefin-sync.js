@@ -28,19 +28,6 @@ function isPayment(description, amount) {
   return amount < 0 && /payment|autopay|thank you/i.test(description)
 }
 
-// Mirrors src/lib/utils.js normalizeMerchant(). Inline to avoid importing
-// from src/ into the serverless bundle.
-function normalizeMerchant(description) {
-  const cleaned = (description || '')
-    .toUpperCase()
-    .replace(/\*\S*/g, '')
-    .replace(/#\d+\s*/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-  const words = cleaned.split(' ').filter(w => w.length > 1)
-  return words.slice(0, 2).join(' ')
-}
-
 async function categorizeViaApi(req, transactions, categories) {
   const host = process.env.VERCEL_URL || req.headers.host
   const proto = host?.includes('localhost') ? 'http' : 'https'
@@ -70,10 +57,12 @@ export default async function handler(req, res) {
     if (connErr) throw new Error(`load connection: ${connErr.message}`)
     if (!conn) return res.status(400).json({ error: 'No SimpleFIN connection configured' })
 
-    // Overlap the previous sync by 2 days to catch late-posted transactions.
+    // 1 day overlap with the last successful sync, which is enough to catch
+    // any late-arriving transactions. First-ever sync falls back to a 1-day
+    // window — the historical backfill is a one-time SQL setup, not in code.
     const startSec = conn.last_synced_at
-      ? Math.floor(new Date(conn.last_synced_at).getTime() / 1000) - 2 * 86400
-      : Math.floor(Date.now() / 1000) - 30 * 86400
+      ? Math.floor(new Date(conn.last_synced_at).getTime() / 1000) - 86400
+      : Math.floor(Date.now() / 1000) - 86400
     const endSec = Math.floor(Date.now() / 1000)
 
     // SimpleFIN access URLs embed creds (https://user:pass@host/...).
@@ -103,7 +92,12 @@ export default async function handler(req, res) {
         // App convention: positive = expense, so flip the sign.
         const amount = -parseFloat(t.amount)
         if (!Number.isFinite(amount)) continue
-        const date = new Date((t.posted ?? t.transacted_at) * 1000).toISOString().slice(0, 10)
+        // Prefer transacted_at (the merchant's transaction date — matches
+        // Chase CSV "Transaction Date") over posted (which lags 1-2 days
+        // and causes date drift vs. CSV uploads).
+        const dateSec = t.transacted_at ?? t.posted
+        if (!dateSec) continue
+        const date = new Date(dateSec * 1000).toISOString().slice(0, 10)
         const description = (t.payee || t.description || '').trim()
         if (!description) continue
         const id = transactionId(date, description, amount, source)
@@ -132,28 +126,30 @@ export default async function handler(req, res) {
       existingIds = new Set((existing ?? []).map(r => r.id))
     }
 
-    // Fuzzy dedup against earlier CSV uploads where the description string
-    // differs (Chase CSV "AMAZON.COM*ABC123" vs SimpleFIN "Amazon.com") but
-    // it's the same purchase. Match on source + amount + date + normalized
-    // merchant. Exact date — same-amount same-merchant repeats on different
-    // days are kept as distinct.
+    // Fuzzy dedup: since we now pull transacted_at (the merchant's date,
+    // same as CSV "Transaction Date"), the same purchase from CSV and from
+    // SimpleFIN should share the same date. Match on source + amount + date
+    // — no description, since description text differs between providers.
+    // Risk: two distinct same-amount purchases at different merchants on
+    // the same day from the same card get falsely merged. With the backfill
+    // window pinned to the connection date, that risk only exists for
+    // ~1 day per sync.
     let fuzzyKeys = new Set()
     const candidateRows = txs.filter(t => !existingIds.has(t.id))
     if (candidateRows.length > 0) {
       const dates = [...new Set(candidateRows.map(t => t.date))]
       const { data: existingForDates, error: fzErr } = await supabase
         .from('transactions')
-        .select('date, description, amount, source')
+        .select('date, amount, source')
         .in('date', dates)
       if (fzErr) throw new Error(`fuzzy-dedup check: ${fzErr.message}`)
       for (const r of existingForDates ?? []) {
-        const key = `${r.source}|${r.date}|${Math.round(parseFloat(r.amount) * 100)}|${normalizeMerchant(r.description)}`
-        fuzzyKeys.add(key)
+        fuzzyKeys.add(`${r.source}|${r.date}|${Math.round(parseFloat(r.amount) * 100)}`)
       }
     }
 
     const newTxs = candidateRows.filter(t => {
-      const key = `${t.source}|${t.date}|${Math.round(t.amount * 100)}|${normalizeMerchant(t.description)}`
+      const key = `${t.source}|${t.date}|${Math.round(t.amount * 100)}`
       return !fuzzyKeys.has(key)
     })
 
