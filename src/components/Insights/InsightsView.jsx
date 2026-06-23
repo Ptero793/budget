@@ -1,15 +1,12 @@
 import { useApp, filterByMonth, computeActuals } from '../../context/AppContext'
 import { formatCurrency, formatMonth } from '../../lib/utils'
+import { getEffectiveBudget, isCategoryHidden } from '../../lib/budget'
 
 function topTransactionInCategory(transactions, category) {
   const txs = transactions
     .filter(t => t.category === category && t.amount > 0)
     .sort((a, b) => b.amount - a.amount)
   return txs[0] || null
-}
-
-function getEffectiveBudget(budgetTargets, budgetOverrides, category, month) {
-  return budgetOverrides[month]?.[category] ?? budgetTargets[category]?.amount ?? 0
 }
 
 export default function InsightsView() {
@@ -24,10 +21,13 @@ export default function InsightsView() {
   const actuals = computeActuals(monthTxs)
 
   // Build the universe of categories: anything with a budget OR any actual spend.
-  const allCategories = new Set([
-    ...Object.keys(budgetTargets).filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED'),
-    ...Object.keys(actuals).filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED'),
-  ])
+  // Skip categories that the user has hidden from this month's budget.
+  const allCategories = new Set(
+    [
+      ...Object.keys(budgetTargets).filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED'),
+      ...Object.keys(actuals).filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED'),
+    ].filter(c => !isCategoryHidden(budgetOverrides, c, month))
+  )
 
   const totalBudget = [...allCategories].reduce(
     (sum, cat) => sum + getEffectiveBudget(budgetTargets, budgetOverrides, cat, month),

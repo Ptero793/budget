@@ -1,23 +1,20 @@
 import { useState } from 'react'
+import { DndContext, PointerSensor, useSensor, useSensors, closestCenter, useDraggable, useDroppable } from '@dnd-kit/core'
 import { useApp, filterByMonth, computeActuals } from '../../context/AppContext'
-import { formatCurrency, formatMonth } from '../../lib/utils'
-
-function getEffectiveBudget(budgetTargets, budgetOverrides, category, month) {
-  return budgetOverrides[month]?.[category] ?? budgetTargets[category]?.amount ?? 0
-}
+import { formatCurrency, formatMonth, getCurrentMonth } from '../../lib/utils'
+import { getEffectiveBudget, getEffectiveType, isCategoryHidden, hasAmountOverride } from '../../lib/budget'
+import ConfirmDialog from '../ConfirmDialog'
 
 // Months strictly before `fromMonth` that have any prior activity and no existing
-// override for this category. We freeze these so changing the default forward
-// doesn't retroactively change historical reports.
+// AMOUNT override for this category. We freeze these so changing the default
+// forward doesn't retroactively change historical reports.
 function frozenMonthsBefore(state, category, fromMonth) {
   const known = new Set([
     ...Object.keys(state.budgetOverrides),
     ...Object.keys(state.incomeActuals),
     ...state.transactions.map(t => t.date.slice(0, 7)),
   ])
-  return [...known].filter(
-    m => m < fromMonth && state.budgetOverrides[m]?.[category] === undefined
-  )
+  return [...known].filter(m => m < fromMonth && !hasAmountOverride(state.budgetOverrides, category, m))
 }
 
 function BudgetCell({ category, budgetTargets, budgetOverrides, selectedMonth, dispatch }) {
@@ -26,7 +23,7 @@ function BudgetCell({ category, budgetTargets, budgetOverrides, selectedMonth, d
   const [draft, setDraft] = useState('')
 
   const isSpecificMonth = selectedMonth && selectedMonth !== 'all'
-  const hasOverride = isSpecificMonth && budgetOverrides[selectedMonth]?.[category] !== undefined
+  const hasOverride = isSpecificMonth && hasAmountOverride(budgetOverrides, category, selectedMonth)
   const defaultAmount = budgetTargets[category]?.amount ?? 0
   const effectiveAmount = isSpecificMonth
     ? getEffectiveBudget(budgetTargets, budgetOverrides, category, selectedMonth)
@@ -145,64 +142,177 @@ function BudgetCell({ category, budgetTargets, budgetOverrides, selectedMonth, d
   )
 }
 
-function SectionRows({ rows, actuals, budgetTargets, budgetOverrides, selectedMonth, dispatch, onShowCategory }) {
+function DndContextWrapper({ sensors, onDropTo, children }) {
+  return (
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      onDragEnd={(event) => {
+        const { active, over } = event
+        if (!over) return
+        const targetType = over.id
+        if (targetType !== 'fixed' && targetType !== 'variable') return
+        onDropTo(active.id, targetType)
+      }}
+    >
+      {children}
+    </DndContext>
+  )
+}
+
+function DroppableSection({ sectionType, label, children }) {
+  const { isOver, setNodeRef } = useDroppable({ id: sectionType })
+  return (
+    <tbody ref={setNodeRef} className={isOver ? 'bg-blue-50' : ''}>
+      <tr className="bg-gray-50">
+        <td colSpan={5} className="py-1.5 px-4 text-xs font-bold text-gray-400 uppercase tracking-widest border-b border-gray-200">
+          {label}
+        </td>
+      </tr>
+      {children}
+    </tbody>
+  )
+}
+
+function AddCategoryRow({ categoriesAvailable, onAdd, onCancel }) {
+  const [picked, setPicked] = useState('')
+  const [newName, setNewName] = useState('')
+
+  const submitExisting = () => {
+    if (!picked) return
+    onAdd(picked, false)
+  }
+  const submitNew = (e) => {
+    e.preventDefault()
+    const name = newName.trim().toUpperCase()
+    if (!name) return
+    onAdd(name, true)
+  }
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <select
+        value={picked}
+        onChange={e => setPicked(e.target.value)}
+        className="text-xs border border-gray-300 rounded px-2 py-1"
+      >
+        <option value="">Pick existing category…</option>
+        {categoriesAvailable.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+      <button
+        onClick={submitExisting}
+        disabled={!picked}
+        className="text-xs bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40 hover:bg-blue-700"
+      >Add</button>
+      <span className="text-xs text-gray-400">or</span>
+      <form onSubmit={submitNew} className="flex items-center gap-2">
+        <input
+          type="text"
+          value={newName}
+          onChange={e => setNewName(e.target.value)}
+          placeholder="New category"
+          className="text-xs border border-gray-300 rounded px-2 py-1 uppercase"
+        />
+        <button
+          type="submit"
+          disabled={!newName.trim()}
+          className="text-xs bg-blue-600 text-white rounded px-2 py-1 disabled:opacity-40 hover:bg-blue-700"
+        >Create</button>
+      </form>
+      <button onClick={onCancel} className="text-xs text-gray-400 hover:text-gray-600 ml-auto">Cancel</button>
+    </div>
+  )
+}
+
+function DraggableBudgetRow({ row, actual, budgetTargets, budgetOverrides, selectedMonth, dispatch, onShowCategory, onRequestRemove }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: row.category })
+  const variance = row.effectiveAmount - actual
+  const pct = row.effectiveAmount > 0 ? Math.round((actual / row.effectiveAmount) * 100) : null
+  const isOver = variance < 0
+  const isEmpty = row.effectiveAmount === 0 && actual === 0
+
+  const style = transform
+    ? { transform: `translate(${transform.x}px, ${transform.y}px)`, opacity: isDragging ? 0.4 : 1, position: 'relative', zIndex: isDragging ? 10 : 0 }
+    : undefined
+
+  return (
+    <tr ref={setNodeRef} style={style} className="hover:bg-gray-50 group transition-colors">
+      <td className="py-2.5 px-4 text-gray-800 font-medium relative">
+        <span
+          {...attributes}
+          {...listeners}
+          className="absolute left-0 top-1/2 -translate-y-1/2 px-1 text-gray-300 hover:text-gray-500 cursor-grab opacity-0 group-hover:opacity-100 select-none"
+          title="Drag to move between sections"
+        >⋮⋮</span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => onShowCategory(row.category)}
+            className="text-left hover:text-blue-700 hover:underline decoration-dashed underline-offset-2"
+            title={`See ${row.category} transactions for this month`}
+          >
+            {row.category}
+          </button>
+          <button
+            onClick={() => onRequestRemove(row.category)}
+            className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs"
+            title="Remove from budget"
+          >✕</button>
+        </div>
+      </td>
+      <td className="py-2.5 px-4 text-right">
+        <BudgetCell
+          category={row.category}
+          budgetTargets={budgetTargets}
+          budgetOverrides={budgetOverrides}
+          selectedMonth={selectedMonth}
+          dispatch={dispatch}
+        />
+      </td>
+      <td className={`py-2.5 px-4 text-right font-mono text-sm ${actual !== 0 ? 'text-gray-900' : 'text-gray-300'}`}>
+        {formatCurrency(actual)}
+      </td>
+      <td className={`py-2.5 px-4 text-right font-mono text-sm font-medium ${
+        isEmpty ? 'text-gray-300' : isOver ? 'text-red-600' : 'text-green-600'
+      }`}>
+        {isEmpty ? '—' : `${variance >= 0 ? '+' : ''}${formatCurrency(variance)}`}
+      </td>
+      <td className="py-2.5 px-4 text-right">
+        {pct !== null && actual > 0 && (
+          <div className="flex items-center gap-1.5 justify-end">
+            <div className="w-14 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full ${pct > 100 ? 'bg-red-500' : pct > 80 ? 'bg-amber-400' : 'bg-green-500'}`}
+                style={{ width: `${Math.min(pct, 100)}%` }}
+              />
+            </div>
+            <span className="text-xs text-gray-400 w-8 text-right">{pct}%</span>
+          </div>
+        )}
+      </td>
+    </tr>
+  )
+}
+
+function SectionRows({ rows, actuals, budgetTargets, budgetOverrides, selectedMonth, dispatch, onShowCategory, onRequestRemove }) {
   const totalBudget = rows.reduce((s, r) => s + r.effectiveAmount, 0)
   const totalActual = rows.reduce((s, r) => s + (actuals[r.category] || 0), 0)
   const totalVariance = totalBudget - totalActual
 
   return (
     <>
-      {rows.map(row => {
-        const actual = actuals[row.category] || 0
-        const variance = row.effectiveAmount - actual
-        const pct = row.effectiveAmount > 0 ? Math.round((actual / row.effectiveAmount) * 100) : null
-        const isOver = variance < 0
-        const isEmpty = row.effectiveAmount === 0 && actual === 0
-
-        return (
-          <tr key={row.category} className="hover:bg-gray-50 group transition-colors">
-            <td className="py-2.5 px-4 text-gray-800 font-medium">
-              <button
-                onClick={() => onShowCategory(row.category)}
-                className="text-left hover:text-blue-700 hover:underline decoration-dashed underline-offset-2"
-                title={`See ${row.category} transactions for this month`}
-              >
-                {row.category}
-              </button>
-            </td>
-            <td className="py-2.5 px-4 text-right">
-              <BudgetCell
-                category={row.category}
-                budgetTargets={budgetTargets}
-                budgetOverrides={budgetOverrides}
-                selectedMonth={selectedMonth}
-                dispatch={dispatch}
-              />
-            </td>
-            <td className={`py-2.5 px-4 text-right font-mono text-sm ${actual !== 0 ? 'text-gray-900' : 'text-gray-300'}`}>
-              {formatCurrency(actual)}
-            </td>
-            <td className={`py-2.5 px-4 text-right font-mono text-sm font-medium ${
-              isEmpty ? 'text-gray-300' : isOver ? 'text-red-600' : 'text-green-600'
-            }`}>
-              {isEmpty ? '—' : `${variance >= 0 ? '+' : ''}${formatCurrency(variance)}`}
-            </td>
-            <td className="py-2.5 px-4 text-right">
-              {pct !== null && actual > 0 && (
-                <div className="flex items-center gap-1.5 justify-end">
-                  <div className="w-14 h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full ${pct > 100 ? 'bg-red-500' : pct > 80 ? 'bg-amber-400' : 'bg-green-500'}`}
-                      style={{ width: `${Math.min(pct, 100)}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-400 w-8 text-right">{pct}%</span>
-                </div>
-              )}
-            </td>
-          </tr>
-        )
-      })}
+      {rows.map(row => (
+        <DraggableBudgetRow
+          key={row.category}
+          row={row}
+          actual={actuals[row.category] || 0}
+          budgetTargets={budgetTargets}
+          budgetOverrides={budgetOverrides}
+          selectedMonth={selectedMonth}
+          dispatch={dispatch}
+          onShowCategory={onShowCategory}
+          onRequestRemove={onRequestRemove}
+        />
+      ))}
       <tr className="bg-gray-50 font-semibold border-t border-gray-300">
         <td className="py-2 px-4 text-xs text-gray-500 uppercase tracking-wide">Subtotal</td>
         <td className="py-2 px-4 text-right font-mono text-sm text-gray-700">{formatCurrency(totalBudget)}</td>
@@ -218,17 +328,44 @@ function SectionRows({ rows, actuals, budgetTargets, budgetOverrides, selectedMo
   )
 }
 
+// "What does this change affect?" calculator, used to populate the confirm
+// dialog with the precise impact based on which month is selected.
+function computeChangeScope(selectedMonth) {
+  if (!selectedMonth || selectedMonth === 'all') return 'allMonths'
+  if (selectedMonth === getCurrentMonth()) return 'currentMonth'
+  return 'specificMonth'
+}
+
 export default function BudgetView() {
   const { state, dispatch } = useApp()
   const { transactions, budgetTargets, budgetOverrides, selectedMonth, categories } = state
   const [previewCategory, setPreviewCategory] = useState(null)
+  const [pending, setPending] = useState(null) // confirmation dialog state
+  const [addingTo, setAddingTo] = useState(null) // 'fixed' | 'variable' | null
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
   const monthTxs = filterByMonth(transactions, selectedMonth)
   const actuals = computeActuals(monthTxs)
 
   const isSpecificMonth = selectedMonth && selectedMonth !== 'all'
 
-  const allCats = categories.filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED')
+  // A category is "in the budget" for a given month if it has a default
+  // budget_target, OR (in a specific month) it has a non-hidden override row
+  // with amount or type set (i.e., a frozen-past row from a removed-at-current
+  // change). Hidden-flagged overrides remove it from that month.
+  const candidateCats = new Set(
+    Object.keys(budgetTargets).filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED')
+  )
+  if (isSpecificMonth) {
+    const monthOverrides = budgetOverrides[selectedMonth] ?? {}
+    for (const c of Object.keys(monthOverrides)) {
+      if (c === 'IGNORE' || c === 'UNCATEGORIZED') continue
+      const ov = monthOverrides[c]
+      if (!ov.hidden && (ov.amount != null || ov.type != null)) candidateCats.add(c)
+    }
+  }
+  const allCats = [...candidateCats]
+    .filter(c => !(isSpecificMonth && isCategoryHidden(budgetOverrides, c, selectedMonth)))
 
   const toRow = (c) => ({
     category: c,
@@ -237,15 +374,14 @@ export default function BudgetView() {
       : (budgetTargets[c]?.amount ?? 0),
   })
 
-  // Show every category the user has set up, even at $0 budget. Categories
-  // only disappear when the user explicitly removes them (per item 3 below).
-  const fixedRows = allCats
-    .filter(c => budgetTargets[c]?.type === 'fixed')
-    .map(toRow)
+  // Type is layered: per-month override → default → 'variable'. Treat unknown
+  // categories (in `categories` table but no budget target row) as variable.
+  const typeOf = (c) => isSpecificMonth
+    ? getEffectiveType(budgetTargets, budgetOverrides, c, selectedMonth)
+    : (budgetTargets[c]?.type ?? 'variable')
 
-  const variableRows = allCats
-    .filter(c => !budgetTargets[c] || budgetTargets[c].type === 'variable')
-    .map(toRow)
+  const fixedRows = allCats.filter(c => typeOf(c) === 'fixed').map(toRow)
+  const variableRows = allCats.filter(c => typeOf(c) !== 'fixed').map(toRow)
 
   const totalBudget = [...fixedRows, ...variableRows].reduce((s, r) => s + r.effectiveAmount, 0)
   const totalActual = Object.values(actuals).reduce((s, v) => s + v, 0)
@@ -280,13 +416,22 @@ export default function BudgetView() {
             </tr>
           </thead>
 
-          {fixedRows.length > 0 && (
-            <tbody>
-              <tr className="bg-gray-50">
-                <td colSpan={5} className="py-1.5 px-4 text-xs font-bold text-gray-400 uppercase tracking-widest border-b border-gray-200">
-                  Fixed Expenses
-                </td>
-              </tr>
+          <DndContextWrapper
+            sensors={sensors}
+            onDropTo={(category, targetType) => {
+              const currentType = isSpecificMonth
+                ? getEffectiveType(budgetTargets, budgetOverrides, category, selectedMonth)
+                : (budgetTargets[category]?.type ?? 'variable')
+              if (currentType === targetType) return
+              setPending({
+                kind: 'move',
+                category,
+                fromType: currentType,
+                toType: targetType,
+              })
+            }}
+          >
+            <DroppableSection sectionType="fixed" label="Fixed Expenses">
               <SectionRows
                 rows={fixedRows}
                 actuals={actuals}
@@ -295,17 +440,32 @@ export default function BudgetView() {
                 selectedMonth={selectedMonth}
                 dispatch={dispatch}
                 onShowCategory={setPreviewCategory}
+                onRequestRemove={(category) => setPending({ kind: 'remove', category })}
               />
-            </tbody>
-          )}
-
-          {variableRows.length > 0 && (
-            <tbody>
-              <tr className="bg-gray-50">
-                <td colSpan={5} className="py-1.5 px-4 text-xs font-bold text-gray-400 uppercase tracking-widest border-b border-gray-200">
-                  Variable Expenses
+              <tr>
+                <td colSpan={5} className="py-2 px-4 text-left">
+                  {addingTo === 'fixed' ? (
+                    <AddCategoryRow
+                      categoriesAvailable={categories.filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED' && !budgetTargets[c])}
+                      onAdd={(category, isNew) => {
+                        setAddingTo(null)
+                        setPending({ kind: 'add', category, targetType: 'fixed', isNew })
+                      }}
+                      onCancel={() => setAddingTo(null)}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setAddingTo('fixed')}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      + Add to fixed
+                    </button>
+                  )}
                 </td>
               </tr>
+            </DroppableSection>
+
+            <DroppableSection sectionType="variable" label="Variable Expenses">
               <SectionRows
                 rows={variableRows}
                 actuals={actuals}
@@ -314,9 +474,31 @@ export default function BudgetView() {
                 selectedMonth={selectedMonth}
                 dispatch={dispatch}
                 onShowCategory={setPreviewCategory}
+                onRequestRemove={(category) => setPending({ kind: 'remove', category })}
               />
-            </tbody>
-          )}
+              <tr>
+                <td colSpan={5} className="py-2 px-4 text-left">
+                  {addingTo === 'variable' ? (
+                    <AddCategoryRow
+                      categoriesAvailable={categories.filter(c => c !== 'IGNORE' && c !== 'UNCATEGORIZED' && !budgetTargets[c])}
+                      onAdd={(category, isNew) => {
+                        setAddingTo(null)
+                        setPending({ kind: 'add', category, targetType: 'variable', isNew })
+                      }}
+                      onCancel={() => setAddingTo(null)}
+                    />
+                  ) : (
+                    <button
+                      onClick={() => setAddingTo('variable')}
+                      className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                    >
+                      + Add to variable
+                    </button>
+                  )}
+                </td>
+              </tr>
+            </DroppableSection>
+          </DndContextWrapper>
 
           <tfoot className="border-t-2 border-gray-300 bg-gray-50">
             <tr className="font-bold text-sm">
@@ -347,6 +529,181 @@ export default function BudgetView() {
           onClose={() => setPreviewCategory(null)}
         />
       )}
+
+      {pending && (() => {
+        const scope = computeChangeScope(selectedMonth)
+        const monthLabel = isSpecificMonth ? formatMonth(selectedMonth) : 'all months'
+        const close = () => setPending(null)
+
+        if (pending.kind === 'remove') {
+          if (scope === 'allMonths') {
+            return (
+              <ConfirmDialog
+                title={`Remove ${pending.category} from the budget?`}
+                body="Removes it from the default budget. Existing transactions are unaffected; the category still exists for categorization."
+                confirmLabel="Remove"
+                destructive
+                onConfirm={() => {
+                  dispatch({ type: 'REMOVE_CATEGORY_FROM_BUDGET_DEFAULT', category: pending.category })
+                  close()
+                }}
+                onCancel={close}
+              />
+            )
+          }
+          if (scope === 'currentMonth') {
+            const frozenMonths = frozenMonthsBefore(state, pending.category, selectedMonth)
+            const oldDefault = budgetTargets[pending.category]?.amount ?? 0
+            const oldType = budgetTargets[pending.category]?.type ?? 'variable'
+            return (
+              <ConfirmDialog
+                title={`Remove ${pending.category} from the budget?`}
+                body={`You're viewing ${monthLabel} (the current month).`}
+                options={[
+                  {
+                    label: `Just ${monthLabel}`,
+                    description: 'Hide from this month only; defaults and other months are unchanged.',
+                    onClick: () => {
+                      dispatch({ type: 'HIDE_CATEGORY_FOR_MONTH', category: pending.category, month: selectedMonth })
+                      close()
+                    },
+                  },
+                  {
+                    label: `From ${monthLabel} forward`,
+                    primary: true,
+                    description: `Removes from defaults so this month and future months exclude it. ${frozenMonths.length} past month(s) frozen at the current setup.`,
+                    onClick: () => {
+                      dispatch({
+                        type: 'REMOVE_CATEGORY_FROM_BUDGET_DEFAULT',
+                        category: pending.category,
+                        freezeFromOldDefault: true,
+                        oldDefault,
+                        oldType,
+                        frozenMonths,
+                      })
+                      close()
+                    },
+                  },
+                ]}
+                onCancel={close}
+              />
+            )
+          }
+          return (
+            <ConfirmDialog
+              title={`Hide ${pending.category} from ${monthLabel}?`}
+              body="This affects only this month. Defaults and other months are unchanged."
+              confirmLabel="Hide"
+              destructive
+              onConfirm={() => {
+                dispatch({ type: 'HIDE_CATEGORY_FOR_MONTH', category: pending.category, month: selectedMonth })
+                close()
+              }}
+              onCancel={close}
+            />
+          )
+        }
+
+        if (pending.kind === 'add') {
+          return (
+            <ConfirmDialog
+              title={`Add ${pending.category} to the ${pending.targetType} budget?`}
+              body={`This updates the default — the category will appear in every month going forward (and any past months without overrides) until you remove it. ${pending.isNew ? 'A new category will be created.' : ''}`}
+              confirmLabel="Add"
+              onConfirm={() => {
+                dispatch({
+                  type: 'ADD_CATEGORY_TO_BUDGET_DEFAULT',
+                  category: pending.category,
+                  categoryType: pending.targetType,
+                })
+                close()
+              }}
+              onCancel={close}
+            />
+          )
+        }
+
+        if (pending.kind === 'move') {
+          if (scope === 'allMonths') {
+            return (
+              <ConfirmDialog
+                title={`Move ${pending.category} to ${pending.toType}?`}
+                body="Updates the default for all months without per-month overrides."
+                confirmLabel="Move"
+                onConfirm={() => {
+                  dispatch({
+                    type: 'CHANGE_CATEGORY_TYPE_DEFAULT',
+                    category: pending.category,
+                    newType: pending.toType,
+                    oldType: pending.fromType,
+                  })
+                  close()
+                }}
+                onCancel={close}
+              />
+            )
+          }
+          if (scope === 'currentMonth') {
+            const frozenMonths = frozenMonthsBefore(state, pending.category, selectedMonth)
+            return (
+              <ConfirmDialog
+                title={`Move ${pending.category} to ${pending.toType}?`}
+                body={`You're viewing ${monthLabel} (the current month).`}
+                options={[
+                  {
+                    label: `Just ${monthLabel}`,
+                    description: 'Change applies to this month only.',
+                    onClick: () => {
+                      dispatch({
+                        type: 'SET_CATEGORY_TYPE_FOR_MONTH',
+                        category: pending.category,
+                        month: selectedMonth,
+                        type: pending.toType,
+                      })
+                      close()
+                    },
+                  },
+                  {
+                    label: `From ${monthLabel} forward`,
+                    primary: true,
+                    description: `Updates the default. ${frozenMonths.length} past month(s) frozen at ${pending.fromType}.`,
+                    onClick: () => {
+                      dispatch({
+                        type: 'CHANGE_CATEGORY_TYPE_DEFAULT',
+                        category: pending.category,
+                        newType: pending.toType,
+                        oldType: pending.fromType,
+                        frozenMonths,
+                      })
+                      close()
+                    },
+                  },
+                ]}
+                onCancel={close}
+              />
+            )
+          }
+          return (
+            <ConfirmDialog
+              title={`Move ${pending.category} to ${pending.toType} for ${monthLabel}?`}
+              body="Affects only this month. Defaults are unchanged."
+              confirmLabel="Move"
+              onConfirm={() => {
+                dispatch({
+                  type: 'SET_CATEGORY_TYPE_FOR_MONTH',
+                  category: pending.category,
+                  month: selectedMonth,
+                  type: pending.toType,
+                })
+                close()
+              }}
+              onCancel={close}
+            />
+          )
+        }
+
+        return null
+      })()}
     </div>
   )
 }

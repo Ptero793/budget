@@ -87,7 +87,11 @@ function reducer(state, action) {
     }
 
     case 'SET_BUDGET_OVERRIDE': {
-      const monthOverrides = { ...state.budgetOverrides[action.month], [action.category]: action.amount }
+      const existing = state.budgetOverrides[action.month]?.[action.category] ?? { amount: null, type: null, hidden: false }
+      const monthOverrides = {
+        ...state.budgetOverrides[action.month],
+        [action.category]: { ...existing, amount: action.amount },
+      }
       return {
         ...state,
         budgetOverrides: { ...state.budgetOverrides, [action.month]: monthOverrides },
@@ -104,11 +108,19 @@ function reducer(state, action) {
 
       const newOverrides = { ...state.budgetOverrides }
       for (const m of frozenMonths) {
-        newOverrides[m] = { ...newOverrides[m], [category]: oldDefault }
+        const existing = newOverrides[m]?.[category] ?? { amount: null, type: null, hidden: false }
+        newOverrides[m] = { ...newOverrides[m], [category]: { ...existing, amount: oldDefault } }
       }
-      if (newOverrides[fromMonth]?.[category] !== undefined) {
+      // Clear the AMOUNT override for fromMonth (preserve type/hidden if present)
+      if (newOverrides[fromMonth]?.[category]?.amount != null) {
+        const ex = newOverrides[fromMonth][category]
+        const cleared = { ...ex, amount: null }
         const monthCopy = { ...newOverrides[fromMonth] }
-        delete monthCopy[category]
+        if (cleared.type == null && !cleared.hidden) {
+          delete monthCopy[category]
+        } else {
+          monthCopy[category] = cleared
+        }
         newOverrides[fromMonth] = monthCopy
       }
 
@@ -125,6 +137,85 @@ function reducer(state, action) {
       return {
         ...state,
         budgetOverrides: { ...state.budgetOverrides, [action.month]: monthOverrides },
+      }
+    }
+
+    // Hide a category from a specific month's budget without touching defaults.
+    case 'HIDE_CATEGORY_FOR_MONTH': {
+      const existing = state.budgetOverrides[action.month]?.[action.category] ?? { amount: null, type: null, hidden: false }
+      return {
+        ...state,
+        budgetOverrides: {
+          ...state.budgetOverrides,
+          [action.month]: { ...state.budgetOverrides[action.month], [action.category]: { ...existing, hidden: true } },
+        },
+      }
+    }
+
+    // Override category type for a specific month (no default change).
+    case 'SET_CATEGORY_TYPE_FOR_MONTH': {
+      const existing = state.budgetOverrides[action.month]?.[action.category] ?? { amount: null, type: null, hidden: false }
+      return {
+        ...state,
+        budgetOverrides: {
+          ...state.budgetOverrides,
+          [action.month]: { ...state.budgetOverrides[action.month], [action.category]: { ...existing, type: action.type } },
+        },
+      }
+    }
+
+    // Remove a category from the default budget. Optionally freeze past months
+    // by writing hidden=true overrides so they keep displaying as before.
+    case 'REMOVE_CATEGORY_FROM_BUDGET_DEFAULT': {
+      const { category, freezeFromOldDefault, oldDefault, oldType, frozenMonths = [] } = action
+      const newTargets = { ...state.budgetTargets }
+      delete newTargets[category]
+
+      const newOverrides = { ...state.budgetOverrides }
+      if (freezeFromOldDefault) {
+        for (const m of frozenMonths) {
+          const existing = newOverrides[m]?.[category] ?? { amount: null, type: null, hidden: false }
+          newOverrides[m] = {
+            ...newOverrides[m],
+            [category]: { ...existing, amount: oldDefault, type: oldType },
+          }
+        }
+      }
+      return { ...state, budgetTargets: newTargets, budgetOverrides: newOverrides }
+    }
+
+    // Add/ensure a category exists in the default budget with a given type.
+    case 'ADD_CATEGORY_TO_BUDGET_DEFAULT': {
+      const { category, categoryType } = action
+      const without = state.categories.filter(c => c !== 'UNCATEGORIZED' && c !== 'IGNORE')
+      const newCategories = state.categories.includes(category)
+        ? state.categories
+        : [...without, category, 'UNCATEGORIZED', 'IGNORE']
+      const existingTarget = state.budgetTargets[category] ?? { amount: 0 }
+      return {
+        ...state,
+        categories: newCategories,
+        budgetTargets: { ...state.budgetTargets, [category]: { amount: existingTarget.amount, type: categoryType } },
+      }
+    }
+
+    // Change the default type of a category. Optionally freeze past months by
+    // writing per-month type overrides at the old type.
+    case 'CHANGE_CATEGORY_TYPE_DEFAULT': {
+      const { category, newType, oldType, frozenMonths = [] } = action
+      const existingTarget = state.budgetTargets[category] ?? { amount: 0 }
+      const newOverrides = { ...state.budgetOverrides }
+      for (const m of frozenMonths) {
+        const existing = newOverrides[m]?.[category] ?? { amount: null, type: null, hidden: false }
+        newOverrides[m] = {
+          ...newOverrides[m],
+          [category]: { ...existing, type: oldType },
+        }
+      }
+      return {
+        ...state,
+        budgetTargets: { ...state.budgetTargets, [category]: { ...existingTarget, type: newType } },
+        budgetOverrides: newOverrides,
       }
     }
 
@@ -157,6 +248,20 @@ function reducer(state, action) {
 
     case 'REMOVE_INCOME_SOURCE':
       return { ...state, incomeSources: state.incomeSources.filter(s => s.id !== action.id) }
+
+    case 'RENAME_INCOME_SOURCE':
+      return {
+        ...state,
+        incomeSources: state.incomeSources.map(s =>
+          s.id === action.id ? { ...s, name: action.name } : s
+        ),
+      }
+
+    case 'REORDER_INCOME_SOURCES': {
+      const byId = new Map(state.incomeSources.map(s => [s.id, s]))
+      const reordered = action.ids.map(id => byId.get(id)).filter(Boolean)
+      return { ...state, incomeSources: reordered }
+    }
 
     case 'SET_INCOME_ACTUAL':
       return {

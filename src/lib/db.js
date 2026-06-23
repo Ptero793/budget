@@ -98,7 +98,11 @@ export async function loadAllState() {
   const budgetOverrides = {}
   for (const row of budgetOverrideRes.data ?? []) {
     if (!budgetOverrides[row.month]) budgetOverrides[row.month] = {}
-    budgetOverrides[row.month][row.category] = parseFloat(row.amount)
+    budgetOverrides[row.month][row.category] = {
+      amount: row.amount != null ? parseFloat(row.amount) : null,
+      type:   row.type ?? null,
+      hidden: row.hidden ?? false,
+    }
   }
 
   return {
@@ -202,13 +206,17 @@ export async function syncAction(action, newState) {
       })
       break
 
-    case 'SET_BUDGET_OVERRIDE':
+    case 'SET_BUDGET_OVERRIDE': {
+      const row = newState.budgetOverrides[action.month]?.[action.category] ?? { amount: action.amount, type: null, hidden: false }
       await supabase.from('budget_overrides').upsert({
         category: action.category,
         month: action.month,
-        amount: action.amount,
+        amount: row.amount,
+        type: row.type,
+        hidden: row.hidden,
       })
       break
+    }
 
     case 'REMOVE_BUDGET_OVERRIDE':
       await supabase.from('budget_overrides')
@@ -216,6 +224,79 @@ export async function syncAction(action, newState) {
         .eq('category', action.category)
         .eq('month', action.month)
       break
+
+    case 'HIDE_CATEGORY_FOR_MONTH': {
+      const row = newState.budgetOverrides[action.month]?.[action.category]
+      await supabase.from('budget_overrides').upsert({
+        category: action.category,
+        month: action.month,
+        amount: row?.amount ?? null,
+        type: row?.type ?? null,
+        hidden: true,
+      })
+      break
+    }
+
+    case 'SET_CATEGORY_TYPE_FOR_MONTH': {
+      const row = newState.budgetOverrides[action.month]?.[action.category]
+      await supabase.from('budget_overrides').upsert({
+        category: action.category,
+        month: action.month,
+        amount: row?.amount ?? null,
+        type: action.type,
+        hidden: row?.hidden ?? false,
+      })
+      break
+    }
+
+    case 'REMOVE_CATEGORY_FROM_BUDGET_DEFAULT': {
+      const { category, freezeFromOldDefault, oldDefault, oldType, frozenMonths = [] } = action
+      await supabase.from('budget_targets').delete().eq('category', category)
+      if (freezeFromOldDefault && frozenMonths.length > 0) {
+        await upsertChunked(
+          'budget_overrides',
+          frozenMonths.map(m => ({ category, month: m, amount: oldDefault, type: oldType, hidden: false }))
+        )
+      }
+      break
+    }
+
+    case 'ADD_CATEGORY_TO_BUDGET_DEFAULT': {
+      const { category, categoryType } = action
+      const existingTarget = newState.budgetTargets[category]
+      const amount = existingTarget?.amount ?? 0
+      const writes = [
+        supabase.from('budget_targets').upsert({ category, amount, type: categoryType }),
+      ]
+      if (!newState.categories.includes(category)) {
+        writes.push(
+          supabase.from('categories').upsert({ category, sort_order: newState.categories.indexOf(category) })
+        )
+      } else {
+        // Category exists already; only need to ensure budget_targets row exists.
+      }
+      await Promise.all(writes)
+      break
+    }
+
+    case 'CHANGE_CATEGORY_TYPE_DEFAULT': {
+      const { category, newType, oldType, frozenMonths = [] } = action
+      const amount = newState.budgetTargets[category]?.amount ?? 0
+      await supabase.from('budget_targets').upsert({ category, amount, type: newType })
+      if (frozenMonths.length > 0) {
+        await upsertChunked(
+          'budget_overrides',
+          frozenMonths.map(m => ({
+            category,
+            month: m,
+            amount: newState.budgetOverrides[m]?.[category]?.amount ?? null,
+            type: oldType,
+            hidden: newState.budgetOverrides[m]?.[category]?.hidden ?? false,
+          }))
+        )
+      }
+      break
+    }
 
     case 'UPDATE_BUDGET_DEFAULT_FROM_MONTH': {
       const { category, amount, fromMonth, frozenMonths, oldDefault } = action
@@ -230,10 +311,23 @@ export async function syncAction(action, newState) {
           frozenMonths.map(m => ({ category, month: m, amount: oldDefault }))
         )
       }
-      await supabase.from('budget_overrides')
-        .delete()
-        .eq('category', category)
-        .eq('month', fromMonth)
+      // Clear amount override for fromMonth — if the row still has type/hidden,
+      // the reducer kept it and we should upsert; otherwise the row is gone.
+      const remaining = newState.budgetOverrides[fromMonth]?.[category]
+      if (remaining) {
+        await supabase.from('budget_overrides').upsert({
+          category,
+          month: fromMonth,
+          amount: remaining.amount,
+          type: remaining.type,
+          hidden: remaining.hidden,
+        })
+      } else {
+        await supabase.from('budget_overrides')
+          .delete()
+          .eq('category', category)
+          .eq('month', fromMonth)
+      }
       break
     }
 
@@ -264,6 +358,18 @@ export async function syncAction(action, newState) {
 
     case 'REMOVE_INCOME_SOURCE':
       await supabase.from('income_sources').delete().eq('id', action.id)
+      break
+
+    case 'RENAME_INCOME_SOURCE':
+      await supabase.from('income_sources').update({ name: action.name }).eq('id', action.id)
+      break
+
+    case 'REORDER_INCOME_SOURCES':
+      await Promise.all(
+        action.ids.map((id, i) =>
+          supabase.from('income_sources').update({ sort_order: i }).eq('id', id)
+        )
+      )
       break
 
     case 'SET_INCOME_ACTUAL':

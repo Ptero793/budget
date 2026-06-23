@@ -1,6 +1,42 @@
 import { useState } from 'react'
+import { DndContext, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { useApp } from '../../context/AppContext'
 import { formatCurrency, getMonthsInYear, formatMonth } from '../../lib/utils'
+
+function InlineName({ value, onSave }) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const commit = () => {
+    const next = draft.trim()
+    if (next && next !== value) onSave(next)
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false) }}
+        className="text-sm border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-40"
+      />
+    )
+  }
+  return (
+    <button
+      onClick={() => { setDraft(value); setEditing(true) }}
+      title="Click to rename"
+      className="font-medium text-gray-800 hover:text-blue-700 hover:underline decoration-dashed underline-offset-2 text-left"
+    >
+      {value}
+    </button>
+  )
+}
 
 function InlineEdit({ value, onSave, prefix = '$', className = '' }) {
   const [editing, setEditing] = useState(false)
@@ -40,11 +76,60 @@ function InlineEdit({ value, onSave, prefix = '$', className = '' }) {
   )
 }
 
+function SortableIncomeRow({ src, visibleMonths, getActual, setActual, ytd, onRename, onRemove, dispatch }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: src.id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  }
+  return (
+    <tr ref={setNodeRef} style={style} className="hover:bg-gray-50 group">
+      <td className="py-2.5 px-4 font-medium text-gray-800 relative">
+        <span
+          {...attributes}
+          {...listeners}
+          className="absolute left-0 top-1/2 -translate-y-1/2 px-1 text-gray-300 hover:text-gray-500 cursor-grab opacity-0 group-hover:opacity-100 select-none"
+          title="Drag to reorder"
+        >⋮⋮</span>
+        <InlineName value={src.name} onSave={onRename} />
+      </td>
+      <td className="py-2.5 px-4 text-right">
+        <InlineEdit
+          value={src.target}
+          onSave={v => dispatch({ type: 'SET_INCOME_TARGET', id: src.id, target: v })}
+        />
+      </td>
+      {visibleMonths.map(m => (
+        <td key={m} className="py-2.5 px-4 text-right">
+          <InlineEdit
+            value={getActual(src.id, m)}
+            onSave={v => setActual(src.id, m, v)}
+          />
+        </td>
+      ))}
+      <td className="py-2.5 px-4 text-right font-mono font-medium text-gray-900">
+        {ytd(src.id) > 0 ? formatCurrency(ytd(src.id)) : '—'}
+      </td>
+      <td className="py-2.5 px-4">
+        <button
+          onClick={onRemove}
+          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 text-xs"
+          title="Remove source"
+        >
+          ✕
+        </button>
+      </td>
+    </tr>
+  )
+}
+
 export default function IncomeView() {
   const { state, dispatch } = useApp()
   const { incomeSources, incomeActuals, selectedMonth } = state
   const [newSourceName, setNewSourceName] = useState('')
   const [showAdd, setShowAdd] = useState(false)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
 
   const year = selectedMonth === 'all'
     ? new Date().getFullYear()
@@ -119,39 +204,36 @@ export default function IncomeView() {
               <th className="py-3 px-4 w-8"></th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100">
-            {incomeSources.map(src => (
-              <tr key={src.id} className="hover:bg-gray-50 group">
-                <td className="py-2.5 px-4 font-medium text-gray-800">{src.name}</td>
-                <td className="py-2.5 px-4 text-right">
-                  <InlineEdit
-                    value={src.target}
-                    onSave={v => dispatch({ type: 'SET_INCOME_TARGET', id: src.id, target: v })}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={({ active, over }) => {
+              if (!over || active.id === over.id) return
+              const oldIndex = incomeSources.findIndex(s => s.id === active.id)
+              const newIndex = incomeSources.findIndex(s => s.id === over.id)
+              if (oldIndex < 0 || newIndex < 0) return
+              const reordered = arrayMove(incomeSources, oldIndex, newIndex)
+              dispatch({ type: 'REORDER_INCOME_SOURCES', ids: reordered.map(s => s.id) })
+            }}
+          >
+            <SortableContext items={incomeSources.map(s => s.id)} strategy={verticalListSortingStrategy}>
+              <tbody className="divide-y divide-gray-100">
+                {incomeSources.map(src => (
+                  <SortableIncomeRow
+                    key={src.id}
+                    src={src}
+                    visibleMonths={visibleMonths}
+                    getActual={getActual}
+                    setActual={setActual}
+                    ytd={ytd}
+                    dispatch={dispatch}
+                    onRename={(name) => dispatch({ type: 'RENAME_INCOME_SOURCE', id: src.id, name })}
+                    onRemove={() => dispatch({ type: 'REMOVE_INCOME_SOURCE', id: src.id })}
                   />
-                </td>
-                {visibleMonths.map(m => (
-                  <td key={m} className="py-2.5 px-4 text-right">
-                    <InlineEdit
-                      value={getActual(src.id, m)}
-                      onSave={v => setActual(src.id, m, v)}
-                    />
-                  </td>
                 ))}
-                <td className="py-2.5 px-4 text-right font-mono font-medium text-gray-900">
-                  {ytd(src.id) > 0 ? formatCurrency(ytd(src.id)) : '—'}
-                </td>
-                <td className="py-2.5 px-4">
-                  <button
-                    onClick={() => dispatch({ type: 'REMOVE_INCOME_SOURCE', id: src.id })}
-                    className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 text-xs"
-                    title="Remove source"
-                  >
-                    ✕
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+              </tbody>
+            </SortableContext>
+          </DndContext>
           <tfoot>
             <tr className="bg-gray-50 border-t-2 border-gray-300 font-semibold">
               <td className="py-2.5 px-4 text-gray-700">Total Income</td>
