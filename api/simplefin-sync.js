@@ -57,13 +57,23 @@ export default async function handler(req, res) {
     if (connErr) throw new Error(`load connection: ${connErr.message}`)
     if (!conn) return res.status(400).json({ error: 'No SimpleFIN connection configured' })
 
-    // 1 day overlap with the last successful sync, which is enough to catch
-    // any late-arriving transactions. First-ever sync falls back to a 1-day
-    // window — the historical backfill is a one-time SQL setup, not in code.
-    const startSec = conn.last_synced_at
-      ? Math.floor(new Date(conn.last_synced_at).getTime() / 1000) - 86400
-      : Math.floor(Date.now() / 1000) - 86400
-    const endSec = Math.floor(Date.now() / 1000)
+    // Sync window. Normal cron path: 1-day overlap with the last successful
+    // sync to catch late-arriving transactions. First-ever sync or post-
+    // reconnect falls back to 30 days, since SimpleFIN can have weeks of
+    // history we haven't pulled. Callers can also pass { days: N } to force
+    // a wider one-shot backfill (capped at 90). The exact-ID + fuzzy dedup
+    // passes below make wider re-pulls idempotent.
+    const nowSec = Math.floor(Date.now() / 1000)
+    const overrideDays = Number(req.body?.days)
+    let startSec
+    if (Number.isFinite(overrideDays) && overrideDays > 0) {
+      startSec = nowSec - Math.min(overrideDays, 90) * 86400
+    } else if (conn.last_synced_at) {
+      startSec = Math.floor(new Date(conn.last_synced_at).getTime() / 1000) - 86400
+    } else {
+      startSec = nowSec - 30 * 86400
+    }
+    const endSec = nowSec
 
     // SimpleFIN access URLs embed creds (https://user:pass@host/...).
     // Node's fetch (undici) refuses URLs with credentials, so extract them
