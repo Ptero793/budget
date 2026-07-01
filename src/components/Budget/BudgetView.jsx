@@ -664,7 +664,7 @@ export default function BudgetView() {
                         type: 'SET_CATEGORY_TYPE_FOR_MONTH',
                         category: pending.category,
                         month: selectedMonth,
-                        type: pending.toType,
+                        categoryType: pending.toType,
                       })
                       close()
                     },
@@ -699,7 +699,7 @@ export default function BudgetView() {
                   type: 'SET_CATEGORY_TYPE_FOR_MONTH',
                   category: pending.category,
                   month: selectedMonth,
-                  type: pending.toType,
+                  categoryType: pending.toType,
                 })
                 close()
               }}
