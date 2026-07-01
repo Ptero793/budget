@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { DndContext, PointerSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core'
+import { DndContext, MouseSensor, TouchSensor, useSensor, useSensors, closestCenter } from '@dnd-kit/core'
 import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { useApp } from '../../context/AppContext'
@@ -89,7 +89,7 @@ function SortableIncomeRow({ src, visibleMonths, getActual, setActual, ytd, onRe
         <span
           {...attributes}
           {...listeners}
-          className="absolute left-0 top-1/2 -translate-y-1/2 px-1 text-gray-300 hover:text-gray-500 cursor-grab opacity-0 group-hover:opacity-100 select-none"
+          className="absolute left-0 top-1/2 -translate-y-1/2 px-1.5 py-2 text-gray-300 hover:text-gray-500 cursor-grab opacity-100 sm:opacity-0 sm:group-hover:opacity-100 select-none touch-none"
           title="Drag to reorder"
         >⋮⋮</span>
         <InlineName value={src.name} onSave={onRename} />
@@ -114,8 +114,9 @@ function SortableIncomeRow({ src, visibleMonths, getActual, setActual, ytd, onRe
       <td className="py-2.5 px-4">
         <button
           onClick={onRemove}
-          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 text-xs"
+          className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-400 hover:text-red-500 text-sm p-1.5 -m-1.5 leading-none"
           title="Remove source"
+          aria-label={`Remove ${src.name}`}
         >
           ✕
         </button>
@@ -129,7 +130,12 @@ export default function IncomeView() {
   const { incomeSources, incomeActuals, selectedMonth } = state
   const [newSourceName, setNewSourceName] = useState('')
   const [showAdd, setShowAdd] = useState(false)
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
+  // Mouse drags start after a small move; touch drags start after a short
+  // press-and-hold so vertical scrolling on a phone isn't hijacked.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  )
 
   const year = selectedMonth === 'all'
     ? new Date().getFullYear()

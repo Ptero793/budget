@@ -159,7 +159,7 @@ function reducer(state, action) {
         ...state,
         budgetOverrides: {
           ...state.budgetOverrides,
-          [action.month]: { ...state.budgetOverrides[action.month], [action.category]: { ...existing, type: action.type } },
+          [action.month]: { ...state.budgetOverrides[action.month], [action.category]: { ...existing, type: action.categoryType } },
         },
       }
     }

@@ -243,7 +243,7 @@ export async function syncAction(action, newState) {
         category: action.category,
         month: action.month,
         amount: row?.amount ?? null,
-        type: action.type,
+        type: action.categoryType,
         hidden: row?.hidden ?? false,
       })
       break

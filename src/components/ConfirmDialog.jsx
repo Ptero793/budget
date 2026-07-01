@@ -17,7 +17,7 @@ export default function ConfirmDialog({
       onClick={onCancel}
     >
       <div
-        className="bg-white rounded-xl shadow-xl max-w-md w-full p-5"
+        className="bg-white rounded-xl shadow-xl max-w-md w-full p-5 max-h-[85vh] overflow-y-auto"
         onClick={e => e.stopPropagation()}
       >
         <h3 className="font-semibold text-gray-900 text-base">{title}</h3>
@@ -29,7 +29,7 @@ export default function ConfirmDialog({
               <button
                 key={i}
                 onClick={opt.onClick}
-                className={`text-left px-3 py-2 rounded-lg border text-sm transition-colors ${
+                className={`text-left px-3 py-2.5 rounded-lg border text-sm transition-colors ${
                   opt.primary
                     ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700'
                     : 'border-gray-200 text-gray-700 hover:bg-gray-50'
@@ -45,13 +45,13 @@ export default function ConfirmDialog({
           <div className="flex justify-end gap-2 mt-5">
             <button
               onClick={onCancel}
-              className="px-3 py-1.5 text-sm rounded text-gray-600 hover:bg-gray-100"
+              className="px-4 py-2 text-sm rounded text-gray-600 hover:bg-gray-100"
             >
               Cancel
             </button>
             <button
               onClick={onConfirm}
-              className={`px-3 py-1.5 text-sm rounded text-white font-medium ${
+              className={`px-4 py-2 text-sm rounded text-white font-medium ${
                 destructive ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
               }`}
             >

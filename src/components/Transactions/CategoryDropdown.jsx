@@ -109,28 +109,29 @@ export default function CategoryDropdown({ transaction }) {
       )}
 
       {showMerchantPrompt && (
-        <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-64 text-xs">
+        <div className="absolute left-0 top-full mt-1 z-20 bg-white border border-gray-200 rounded-lg shadow-lg p-3 w-64 max-w-[calc(100vw-2rem)] text-xs">
           <p className="font-medium text-gray-700 mb-1">Save for this merchant?</p>
           <p className="text-gray-500 mb-2">
             Apply <strong>{pendingCategory}</strong> to all transactions from{' '}
             <strong>{normalizeMerchant(transaction.description)}</strong>?
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <button
               onClick={() => handleMerchantOverride(true)}
-              className="flex-1 bg-blue-600 text-white rounded px-2 py-1.5 font-medium hover:bg-blue-700"
+              className="flex-1 bg-blue-600 text-white rounded px-2 py-2 font-medium hover:bg-blue-700"
             >
               Yes, save rule
             </button>
             <button
               onClick={() => handleMerchantOverride(false)}
-              className="flex-1 bg-gray-100 text-gray-600 rounded px-2 py-1.5 hover:bg-gray-200"
+              className="flex-1 bg-gray-100 text-gray-600 rounded px-2 py-2 hover:bg-gray-200"
             >
               Just this one
             </button>
             <button
               onClick={() => { setShowMerchantPrompt(false); setPendingCategory(null) }}
-              className="text-gray-400 hover:text-gray-600"
+              className="text-gray-400 hover:text-gray-600 py-2 px-1 self-end sm:self-auto"
+              aria-label="Dismiss"
             >
               ✕
             </button>

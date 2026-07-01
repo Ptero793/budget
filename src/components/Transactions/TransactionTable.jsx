@@ -152,8 +152,9 @@ function TransactionRow({ tx, selected, onToggle, onDelete }) {
       <td className="py-2.5 px-4">
         <button
           onClick={onDelete}
-          className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all text-xs"
+          className="opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-all text-sm p-1.5 -m-1.5 leading-none"
           title="Delete transaction"
+          aria-label="Delete transaction"
         >
           ✕
         </button>
