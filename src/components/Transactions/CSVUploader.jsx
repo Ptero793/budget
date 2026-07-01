@@ -104,7 +104,7 @@ export default function CSVUploader() {
           <>
             <p className="text-3xl mb-2">📤</p>
             <p className="text-sm font-medium text-gray-700">
-              Drop a CSV here or <span className="text-blue-600">click to upload</span>
+              <span className="text-blue-600">Tap to upload</span> a CSV<span className="hidden sm:inline"> or drop one here</span>
             </p>
             <p className="text-xs text-gray-400 mt-1">Chase Sapphire · American Express</p>
           </>

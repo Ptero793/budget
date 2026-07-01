@@ -118,26 +118,26 @@ export default function SimpleFINPanel() {
             </a>{' '}
             to link your bank accounts.
           </p>
-          <div className="flex gap-2">
+          <div className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               value={token}
               onChange={e => setToken(e.target.value)}
               placeholder="Setup token (base64 string)"
-              className="flex-1 text-xs border border-gray-300 rounded px-2 py-1.5 font-mono"
+              className="flex-1 min-w-0 text-xs border border-gray-300 rounded px-2 py-1.5 font-mono"
               disabled={status === 'connecting'}
             />
             <button
               onClick={connect}
               disabled={!token.trim() || status === 'connecting'}
-              className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300"
+              className="px-3 py-2 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-300"
             >
               Connect
             </button>
           </div>
         </>
       ) : (
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <span className="text-xs text-gray-600">
             Last synced: <strong className="text-gray-800">{timeAgo(connection.last_synced_at)}</strong>
           </span>
@@ -181,7 +181,8 @@ export default function SimpleFINPanel() {
                 <span className="ml-2 font-normal text-gray-500">({acct.transaction_count} txs)</span>
               </p>
               {acct.transactions.length > 0 && (
-                <table className="w-full mt-1.5 text-[11px]">
+                <div className="mt-1.5 overflow-x-auto">
+                <table className="w-full text-[11px] min-w-[420px]">
                   <thead className="text-gray-400">
                     <tr>
                       <th className="text-left font-normal pr-2">transacted_at</th>
@@ -203,6 +204,7 @@ export default function SimpleFINPanel() {
                     ))}
                   </tbody>
                 </table>
+                </div>
               )}
             </div>
           ))}

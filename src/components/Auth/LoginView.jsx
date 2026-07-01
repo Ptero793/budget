@@ -113,7 +113,7 @@ export default function LoginView() {
           {mode === 'signin' && (
             <button
               onClick={handleReset}
-              className="mt-3 w-full text-center text-xs text-gray-400 hover:text-gray-600"
+              className="mt-3 w-full text-center text-sm text-gray-500 hover:text-gray-700 py-1"
             >
               Forgot password?
             </button>

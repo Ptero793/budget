@@ -123,18 +123,18 @@ export default function TransactionsView() {
             Transactions
             <span className="ml-2 text-sm font-normal text-gray-400">({monthTxs.length})</span>
           </h2>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="w-full sm:w-auto sm:ml-auto flex flex-wrap items-center gap-2">
             <input
               type="text"
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search description…"
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-44"
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 w-full sm:w-44"
             />
             <select
               value={filterCat}
               onChange={e => { setFilterCat(e.target.value); clearSelection() }}
-              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 flex-1 sm:flex-none min-w-0"
             >
               <option value="all">All categories</option>
               <option value="UNCATEGORIZED">⚠ Uncategorized</option>
@@ -217,11 +217,11 @@ export default function TransactionsView() {
             >
               Select all {filtered.length}
             </button>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="w-full sm:w-auto sm:ml-auto flex flex-wrap items-center gap-2">
               <select
                 value={bulkCategory}
                 onChange={e => setBulkCategory(e.target.value)}
-                className="text-sm border border-blue-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white"
+                className="text-sm border border-blue-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white flex-1 sm:flex-none min-w-0"
               >
                 <option value="">Set category…</option>
                 <option value="IGNORE">IGNORE</option>

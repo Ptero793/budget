@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { DndContext, PointerSensor, useSensor, useSensors, closestCenter, useDraggable, useDroppable } from '@dnd-kit/core'
+import { DndContext, MouseSensor, TouchSensor, useSensor, useSensors, closestCenter, useDraggable, useDroppable } from '@dnd-kit/core'
 import { useApp, filterByMonth, computeActuals } from '../../context/AppContext'
 import { formatCurrency, formatMonth, getCurrentMonth } from '../../lib/utils'
 import { getEffectiveBudget, getEffectiveType, isCategoryHidden, hasAmountOverride } from '../../lib/budget'
@@ -241,7 +241,7 @@ function DraggableBudgetRow({ row, actual, budgetTargets, budgetOverrides, selec
         <span
           {...attributes}
           {...listeners}
-          className="absolute left-0 top-1/2 -translate-y-1/2 px-1 text-gray-300 hover:text-gray-500 cursor-grab opacity-0 group-hover:opacity-100 select-none"
+          className="absolute left-0 top-1/2 -translate-y-1/2 px-1.5 py-2 text-gray-300 hover:text-gray-500 cursor-grab opacity-100 sm:opacity-0 sm:group-hover:opacity-100 select-none touch-none"
           title="Drag to move between sections"
         >⋮⋮</span>
         <div className="flex items-center gap-2">
@@ -254,8 +254,9 @@ function DraggableBudgetRow({ row, actual, budgetTargets, budgetOverrides, selec
           </button>
           <button
             onClick={() => onRequestRemove(row.category)}
-            className="text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 text-xs"
+            className="text-gray-400 hover:text-red-500 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 text-sm p-1 -m-1 leading-none"
             title="Remove from budget"
+            aria-label={`Remove ${row.category} from budget`}
           >✕</button>
         </div>
       </td>
@@ -342,7 +343,12 @@ export default function BudgetView() {
   const [previewCategory, setPreviewCategory] = useState(null)
   const [pending, setPending] = useState(null) // confirmation dialog state
   const [addingTo, setAddingTo] = useState(null) // 'fixed' | 'variable' | null
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
+  // Mouse drags start after a small move; touch drags start after a short
+  // press-and-hold so vertical scrolling on a phone isn't hijacked.
+  const sensors = useSensors(
+    useSensor(MouseSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 8 } }),
+  )
 
   const monthTxs = filterByMonth(transactions, selectedMonth)
   const actuals = computeActuals(monthTxs)

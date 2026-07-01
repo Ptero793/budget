@@ -60,7 +60,7 @@ export default function SummaryCards() {
       {cards.map(card => (
         <div key={card.label} className={`${card.bg} rounded-xl p-4`}>
           <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">{card.label}</p>
-          <p className={`text-2xl font-bold mt-1 ${card.color}`}>{card.value}</p>
+          <p className={`text-xl sm:text-2xl font-bold mt-1 truncate ${card.color}`}>{card.value}</p>
           <p className="text-xs text-gray-500 mt-0.5">{card.sub}</p>
         </div>
       ))}

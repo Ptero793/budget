@@ -83,7 +83,7 @@ export default function InsightsView() {
         <h2 className={`text-3xl font-bold mt-1 ${isOverBudget ? 'text-red-700' : 'text-green-700'}`}>
           {isOverBudget ? 'Over budget' : 'Under budget'} by {formatCurrency(Math.abs(netVariance))}
         </h2>
-        <div className="flex flex-wrap gap-6 mt-4 text-sm">
+        <div className="flex flex-wrap gap-x-6 gap-y-2 mt-4 text-sm">
           <div>
             <span className="text-gray-500">Budget</span>
             <span className="ml-2 font-semibold text-gray-800">{formatCurrency(totalBudget)}</span>
