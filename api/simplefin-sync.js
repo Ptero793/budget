@@ -1,4 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
+import { applyKeywordRules } from '../src/lib/categorizer.js'
+import { normalizeMerchant } from '../src/lib/utils.js'
 
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
@@ -163,7 +165,37 @@ export default async function handler(req, res) {
       return !fuzzyKeys.has(key)
     })
 
-    // AI categorize the un-flagged remainder
+    // Apply merchant overrides, then keyword rules — same order as the
+    // CSV path (src/lib/categorizer.js categorizeLocally).
+    let overrideCategorized = 0
+    let ruleCategorized = 0
+    if (newTxs.some(t => t.category === null)) {
+      const { data: overrideRows, error: ovErr } = await supabase
+        .from('merchant_overrides')
+        .select('merchant_key, category')
+      if (ovErr) throw new Error(`load merchant overrides: ${ovErr.message}`)
+      const merchantOverrides = {}
+      for (const r of overrideRows ?? []) merchantOverrides[r.merchant_key] = r.category
+
+      for (const t of newTxs) {
+        if (t.category !== null) continue
+        const override = merchantOverrides[normalizeMerchant(t.description)]
+        if (override) {
+          t.category = override
+          t.categorization_source = 'override'
+          overrideCategorized++
+          continue
+        }
+        const ruleCategory = applyKeywordRules(t.description)
+        if (ruleCategory) {
+          t.category = ruleCategory
+          t.categorization_source = 'rule'
+          ruleCategorized++
+        }
+      }
+    }
+
+    // AI categorize the remainder
     const needsCategorize = newTxs.filter(t => t.category === null)
     let aiCategorized = 0
     if (needsCategorize.length > 0) {
@@ -209,6 +241,8 @@ export default async function handler(req, res) {
       duplicates: txs.length - newTxs.length,
       exact_dupes: existingIds.size,
       fuzzy_dupes: candidateRows.length - newTxs.length,
+      override_categorized: overrideCategorized,
+      rule_categorized: ruleCategorized,
       ai_categorized: aiCategorized,
     })
   } catch (err) {

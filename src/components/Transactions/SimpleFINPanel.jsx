@@ -59,6 +59,9 @@ export default function SimpleFINPanel() {
       setMessage(
         `Imported ${body.imported} transactions` +
         (body.duplicates > 0 ? ` (${body.duplicates} dupes skipped)` : '') +
+        (body.override_categorized + body.rule_categorized > 0
+          ? ` · ${body.override_categorized + body.rule_categorized} by rule`
+          : '') +
         (body.ai_categorized > 0 ? ` · ${body.ai_categorized} AI-categorized` : '')
       )
       await loadConnection()

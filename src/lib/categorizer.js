@@ -1,10 +1,11 @@
-import { KEYWORD_RULES } from '../data/keywordRules'
-import { normalizeMerchant } from './utils'
+// Explicit .js extensions so api/simplefin-sync.js can import this under Node ESM.
+import { KEYWORD_RULES } from '../data/keywordRules.js'
+import { normalizeMerchant } from './utils.js'
 
 // Sort rules by keyword length descending so longer (more specific) rules match first
 const SORTED_RULES = [...KEYWORD_RULES].sort((a, b) => b.keyword.length - a.keyword.length)
 
-function applyKeywordRules(description) {
+export function applyKeywordRules(description) {
   const lower = description.toLowerCase()
   for (const rule of SORTED_RULES) {
     if (lower.includes(rule.keyword.toLowerCase())) {
